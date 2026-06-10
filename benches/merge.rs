@@ -3,7 +3,7 @@
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use wasm_fuse::{ExportConflictPolicy, ExportSelection, MergeOptions, Merger};
+use wasm_fuse::{ExportConflictPolicy, MergeOptions, Merger};
 
 /// A chain of `length` modules: each calls the next module's export.
 fn chain_modules(length: usize) -> Vec<(String, Vec<u8>)> {
@@ -43,7 +43,7 @@ fn wide_modules(functions: usize) -> Vec<(String, Vec<u8>)> {
 
 fn merge(modules: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut merger = Merger::new(MergeOptions {
-        exports: ExportSelection::Union(ExportConflictPolicy::Rename),
+        export_conflicts: ExportConflictPolicy::Rename,
         ..MergeOptions::default()
     });
     for (name, binary) in modules {

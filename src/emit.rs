@@ -11,7 +11,7 @@ use wasm_encoder::{
 };
 
 use crate::inline::InlinePlan;
-use crate::merge::{ExportConflictPolicy, ExportSelection, MergeError, MergeOptions};
+use crate::merge::{ExportConflictPolicy, MergeError, MergeOptions};
 use crate::parse::{Kind, ParsedModule};
 use crate::prune::Liveness;
 use crate::remap::{Remapper, flatten_error};
@@ -33,65 +33,68 @@ pub(crate) fn surviving_exports(
     parsed: &[ParsedModule<'_>],
     options: &MergeOptions,
 ) -> Result<Vec<SurvivingExport>, MergeError> {
-    let mut survivors = Vec::new();
-    match &options.exports {
-        // Only the entry-point module's exports survive; its imports were
-        // satisfied (where possible) by the other modules during resolution.
-        // Export names within one module are already unique, so no conflict
-        // handling is needed.
-        ExportSelection::Entry(entry) => {
-            let module_idx = parsed
-                .iter()
-                .position(|module| module.name == *entry)
-                .ok_or_else(|| MergeError::UnknownEntryModule {
-                    name: entry.clone(),
-                })?;
-            for export in &parsed[module_idx].exports {
-                survivors.push(SurvivingExport {
-                    module: module_idx,
-                    name: export.name.to_string(),
-                    kind: export.kind,
-                    index: export.index,
-                });
-            }
-        }
-        ExportSelection::Union(conflict_policy) => {
-            let mut export_names: HashSet<String> = HashSet::new();
-            for (module_idx, input) in parsed.iter().enumerate() {
-                for export in &input.exports {
-                    let name = if export_names.contains(export.name) {
-                        match conflict_policy {
-                            ExportConflictPolicy::Error => {
-                                return Err(MergeError::ExportConflict {
-                                    name: export.name.to_string(),
-                                });
-                            }
-                            ExportConflictPolicy::Skip => continue,
-                            ExportConflictPolicy::Rename => {
-                                // Probe name_1, name_2, ... like binaryen's
-                                // Names::getValidExportName.
-                                let mut suffix = 1u32;
-                                loop {
-                                    let candidate = format!("{}_{suffix}", export.name);
-                                    if !export_names.contains(&candidate) {
-                                        break candidate;
-                                    }
-                                    suffix += 1;
-                                }
-                            }
-                        }
-                    } else {
-                        export.name.to_string()
-                    };
-                    export_names.insert(name.clone());
-                    survivors.push(SurvivingExport {
-                        module: module_idx,
-                        name,
-                        kind: export.kind,
-                        index: export.index,
+    // The modules whose exports are kept, in priority order. No selection
+    // keeps every module, in input order (the union wasm-merge produces);
+    // an empty selection keeps no exports at all. Modules outside the
+    // selection only serve to satisfy (some of) the selected modules'
+    // imports during resolution.
+    let module_indices: Vec<usize> = match &options.entry_modules {
+        None => (0..parsed.len()).collect(),
+        Some(entry_modules) => {
+            let mut indices = Vec::with_capacity(entry_modules.len());
+            for entry in entry_modules {
+                let module_idx = parsed
+                    .iter()
+                    .position(|module| module.name == *entry)
+                    .ok_or_else(|| MergeError::UnknownEntryModule {
+                        name: entry.clone(),
+                    })?;
+                if indices.contains(&module_idx) {
+                    return Err(MergeError::DuplicateEntryModule {
+                        name: entry.clone(),
                     });
                 }
+                indices.push(module_idx);
             }
+            indices
+        }
+    };
+
+    let mut survivors = Vec::new();
+    let mut export_names: HashSet<String> = HashSet::new();
+    for module_idx in module_indices {
+        for export in &parsed[module_idx].exports {
+            let name = if export_names.contains(export.name) {
+                match options.export_conflicts {
+                    ExportConflictPolicy::Error => {
+                        return Err(MergeError::ExportConflict {
+                            name: export.name.to_string(),
+                        });
+                    }
+                    ExportConflictPolicy::Skip => continue,
+                    ExportConflictPolicy::Rename => {
+                        // Probe name_1, name_2, ... like binaryen's
+                        // Names::getValidExportName.
+                        let mut suffix = 1u32;
+                        loop {
+                            let candidate = format!("{}_{suffix}", export.name);
+                            if !export_names.contains(&candidate) {
+                                break candidate;
+                            }
+                            suffix += 1;
+                        }
+                    }
+                }
+            } else {
+                export.name.to_string()
+            };
+            export_names.insert(name.clone());
+            survivors.push(SurvivingExport {
+                module: module_idx,
+                name,
+                kind: export.kind,
+                index: export.index,
+            });
         }
     }
     Ok(survivors)

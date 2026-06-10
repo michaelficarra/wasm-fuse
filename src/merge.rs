@@ -5,44 +5,35 @@ use wasmparser::WasmFeatures;
 
 use crate::{check, emit, inline, names, parse, prune, resolve, sourcemap, types};
 
-/// What to do when two input modules export the same name (in
-/// [`ExportSelection::Union`] mode).
+/// What to do when two kept modules export the same name (see
+/// [`MergeOptions::export_conflicts`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExportConflictPolicy {
     /// Report an error and abort the merge (wasm-merge's default).
     #[default]
     Error,
-    /// Keep the first export and rename later ones by appending `_1`, `_2`, …
+    /// Keep the earlier export and rename later ones by appending `_1`, `_2`, …
     /// (wasm-merge's `--rename-export-conflicts`).
     Rename,
-    /// Keep the first export and drop later conflicting ones
+    /// Keep the earlier export and drop later conflicting ones
     /// (wasm-merge's `--skip-export-conflicts`).
     Skip,
-}
-
-/// Which exports the merged module keeps.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ExportSelection {
-    /// Export everything every input module exports, resolving name conflicts
-    /// according to the [`ExportConflictPolicy`]. This is what wasm-merge
-    /// does.
-    Union(ExportConflictPolicy),
-    /// Export only the exports of the named entry-point module; the other
-    /// modules are only used to (partially or fully) satisfy its imports.
-    Entry(String),
-}
-
-impl Default for ExportSelection {
-    fn default() -> Self {
-        ExportSelection::Union(ExportConflictPolicy::default())
-    }
 }
 
 /// Options controlling a [`Merger`].
 #[derive(Clone, Debug)]
 pub struct MergeOptions {
-    /// Which exports the merged module keeps.
-    pub exports: ExportSelection,
+    /// The modules whose exports are kept, in priority order: on an export
+    /// name conflict the earlier-listed module's export wins, and
+    /// [`export_conflicts`](MergeOptions::export_conflicts) decides the
+    /// loser's fate. Modules that are not listed only serve to (partially
+    /// or fully) satisfy the listed modules' imports. `None` keeps every
+    /// input module's exports, in input order — the union wasm-merge
+    /// produces. `Some(vec![])` keeps no exports at all: the merged module
+    /// then acts only through its start functions.
+    pub entry_modules: Option<Vec<String>>,
+    /// What to do when two kept modules export the same name.
+    pub export_conflicts: ExportConflictPolicy,
     /// WebAssembly proposals accepted in the inputs and used to validate the
     /// output.
     pub features: WasmFeatures,
@@ -55,8 +46,9 @@ pub struct MergeOptions {
     /// nothing live references are dropped. wasm-merge does this
     /// unconditionally (its remove-unused-module-elements pass); here it is
     /// off by default — merging alone never deletes code. Combined with
-    /// [`ExportSelection::Entry`] this tree-shakes a bundle down to what the
-    /// entry-point module actually uses.
+    /// [`MergeOptions::entry_modules`] this tree-shakes a bundle down to
+    /// what the entry modules (or, with `Some(vec![])`, just the start
+    /// functions) actually use.
     pub prune_unused: bool,
     /// Merge the inputs' "name" custom sections (debug names for functions,
     /// locals, types, …) into the output, with indices remapped. Names of
@@ -88,7 +80,8 @@ pub struct MergeOptions {
 impl Default for MergeOptions {
     fn default() -> Self {
         MergeOptions {
-            exports: ExportSelection::default(),
+            entry_modules: None,
+            export_conflicts: ExportConflictPolicy::default(),
             features: WasmFeatures::default(),
             validate: true,
             prune_unused: false,
@@ -137,11 +130,18 @@ pub enum MergeError {
         /// The conflicting export name.
         name: String,
     },
-    /// The module named by [`ExportSelection::Entry`] is not among the
+    /// A module named in [`MergeOptions::entry_modules`] is not among the
     /// inputs.
     #[error("entry module {name:?} is not among the input modules")]
     UnknownEntryModule {
         /// The entry module name that was not found.
+        name: String,
+    },
+    /// The same module is named twice in
+    /// [`MergeOptions::entry_modules`].
+    #[error("duplicate entry module {name:?}")]
+    DuplicateEntryModule {
+        /// The module name that was listed more than once.
         name: String,
     },
     /// A chain of imports re-exporting other imports never reaches a
@@ -297,7 +297,7 @@ impl Merger {
             .map(|input| parse::parse_module(&input.name, &input.binary))
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Also validates that an Entry export selection names an input module.
+        // Also validates the entry-module list (unknown or duplicate names).
         let exports = emit::surviving_exports(&parsed, &self.options)?;
 
         let canon = types::canonicalise(&parsed)?;

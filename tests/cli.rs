@@ -325,14 +325,293 @@ fn entry_mode_with_unknown_module_is_an_error() {
 }
 
 #[test]
-fn entry_mode_rejects_export_conflict_policy() {
-    // --export-conflicts only makes sense when unioning exports; clap should
-    // reject the combination.
+fn entry_composes_with_export_conflict_policy() {
+    // A single entry module can never conflict with itself, so the policy is
+    // simply never exercised — but the flags must combine.
     let dir = tempfile::tempdir().unwrap();
     let (app, lib) = write_entry_fixtures(dir.path());
     let output = wasm_fuse()
         .args([&app, &lib])
-        .args(["--entry", "app", "--export-conflicts=rename"])
+        .args([
+            "--entry",
+            "app",
+            "--export-conflicts=rename",
+            "--text",
+            "-o",
+            "-",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains(r#"(export "main""#), "missing main: {text}");
+    assert!(
+        !text.contains(r#"(export "answer""#),
+        "library exports should not survive: {text}"
+    );
+}
+
+#[test]
+fn multiple_entries_union_their_exports() {
+    let dir = tempfile::tempdir().unwrap();
+    let (app, lib) = write_entry_fixtures(dir.path());
+    let admin_path = dir.path().join("admin.wat");
+    std::fs::write(
+        &admin_path,
+        r#"(module (func (export "admin") (result i32) (i32.const 1)))"#,
+    )
+    .unwrap();
+    let admin = admin_path.display().to_string();
+    let output = wasm_fuse()
+        .args([&app, &admin, &lib])
+        .args(["--entry", "app", "--entry", "admin", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    // Both entry modules' exports survive; the library's do not.
+    assert!(text.contains(r#"(export "main""#), "missing main: {text}");
+    assert!(text.contains(r#"(export "admin""#), "missing admin: {text}");
+    assert!(
+        !text.contains(r#"(export "answer""#) && !text.contains(r#"(export "extra""#),
+        "library exports should not survive: {text}"
+    );
+    // The library still satisfied app's lib.answer import.
+    assert!(
+        !text.contains(r#"(import "lib""#),
+        "lib import should have fused: {text}"
+    );
+}
+
+/// Write import-free `app` (exports "main" and "shared") and `admin`
+/// (exports "shared") modules into `dir`. With no imports to fuse, the merged
+/// function indices are predictable from the positional input order app,
+/// admin: 0 = main, 1 = app's shared, 2 = admin's shared.
+fn write_conflicting_fixtures(dir: &std::path::Path) -> (String, String) {
+    let app = dir.join("app.wat");
+    let admin = dir.join("admin.wat");
+    std::fs::write(
+        &app,
+        r#"(module
+            (func (export "main") (result i32) (i32.const 0))
+            (func (export "shared") (result i32) (i32.const 1)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &admin,
+        r#"(module (func (export "shared") (result i32) (i32.const 2)))"#,
+    )
+    .unwrap();
+    (app.display().to_string(), admin.display().to_string())
+}
+
+#[test]
+fn entry_conflicts_error_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let (app, admin) = write_conflicting_fixtures(dir.path());
+    let output = wasm_fuse()
+        .args([&app, &admin])
+        .args(["--entry", "app", "--entry", "admin", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("export name conflict: shared"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn entry_order_sets_conflict_priority_under_rename() {
+    // Both modules export "shared"; the entry list is a priority order, so
+    // swapping it flips which module keeps the name and which is renamed.
+    let dir = tempfile::tempdir().unwrap();
+    let (app, admin) = write_conflicting_fixtures(dir.path());
+    let merged = |entries: &[&str]| {
+        let output = wasm_fuse()
+            .args([&app, &admin])
+            .args(entries)
+            .args(["--export-conflicts=rename", "--text", "-o", "-"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let app_first = merged(&["--entry", "app", "--entry", "admin"]);
+    assert!(
+        app_first.contains(r#"(export "shared" (func 1))"#),
+        "{app_first}"
+    );
+    assert!(
+        app_first.contains(r#"(export "shared_1" (func 2))"#),
+        "{app_first}"
+    );
+    let admin_first = merged(&["--entry", "admin", "--entry", "app"]);
+    assert!(
+        admin_first.contains(r#"(export "shared" (func 2))"#),
+        "{admin_first}"
+    );
+    assert!(
+        admin_first.contains(r#"(export "shared_1" (func 1))"#),
+        "{admin_first}"
+    );
+}
+
+#[test]
+fn entry_order_sets_conflict_priority_under_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    let (app, admin) = write_conflicting_fixtures(dir.path());
+    let merged = |entries: &[&str]| {
+        let output = wasm_fuse()
+            .args([&app, &admin])
+            .args(entries)
+            .args(["--export-conflicts=skip", "--text", "-o", "-"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let app_first = merged(&["--entry", "app", "--entry", "admin"]);
+    assert_eq!(
+        app_first.matches(r#"(export "shared""#).count(),
+        1,
+        "the later conflicting export should be dropped: {app_first}"
+    );
+    assert!(
+        app_first.contains(r#"(export "shared" (func 1))"#),
+        "{app_first}"
+    );
+    let admin_first = merged(&["--entry", "admin", "--entry", "app"]);
+    assert!(
+        admin_first.contains(r#"(export "shared" (func 2))"#),
+        "{admin_first}"
+    );
+}
+
+#[test]
+fn unknown_entry_among_multiple_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (app, lib) = write_entry_fixtures(dir.path());
+    let output = wasm_fuse()
+        .args([&app, &lib])
+        .args(["--entry", "app", "--entry", "ghost", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("entry module \"ghost\" is not among the input modules"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn duplicate_entry_modules_are_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (app, lib) = write_entry_fixtures(dir.path());
+    let output = wasm_fuse()
+        .args([&app, &lib])
+        .args(["--entry", "app", "--entry", "app", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("duplicate entry module \"app\""),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn no_exports_drops_every_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let (app, lib) = write_entry_fixtures(dir.path());
+    let output = wasm_fuse()
+        .args([&app, &lib])
+        .args(["--no-exports", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !text.contains("(export"),
+        "no exports should survive: {text}"
+    );
+    // Without --prune nothing is deleted: main, answer, and extra remain.
+    assert_eq!(text.matches("\n  (func").count(), 3, "{text}");
+}
+
+#[test]
+fn no_exports_with_prune_keeps_only_start_reachable_code() {
+    // The merged module's only behaviour is its start function; pruning
+    // drops everything else, including all the would-be exports.
+    let dir = tempfile::tempdir().unwrap();
+    let init = dir.path().join("init.wat");
+    let lib = dir.path().join("lib.wat");
+    std::fs::write(
+        &init,
+        r#"(module
+            (import "lib" "log" (func $log (param i32)))
+            (func $init (call $log (i32.const 1)))
+            (func (export "api") (result i32) (i32.const 3))
+            (start $init))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &lib,
+        r#"(module
+            (func (export "log") (param i32) (drop (local.get 0)))
+            (func (export "unused") (result i32) (i32.const 0)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(&init)
+        .arg(&lib)
+        .args(["--no-exports", "--prune", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("(start"), "start must survive: {text}");
+    assert!(!text.contains("(export"), "{text}");
+    // Only $init and the fused lib.log survive; "api" and "unused" go.
+    assert_eq!(text.matches("\n  (func").count(), 2, "{text}");
+}
+
+#[test]
+fn no_exports_rejects_entry() {
+    // Keeping no exports and keeping a module's exports contradict each
+    // other; clap rejects the combination.
+    let dir = tempfile::tempdir().unwrap();
+    let (app, lib) = write_entry_fixtures(dir.path());
+    let output = wasm_fuse()
+        .args([&app, &lib])
+        .args(["--no-exports", "--entry", "app", "-o", "-"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -341,6 +620,63 @@ fn entry_mode_rejects_export_conflict_policy() {
         stderr.contains("cannot be used with"),
         "unexpected stderr: {stderr}"
     );
+}
+
+#[test]
+fn prune_keeps_both_entry_modules_reachable_code() {
+    // Each entry module pulls a different library function; pruning keeps
+    // both pulled functions and drops only the library's dead one.
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("app.wat");
+    let admin = dir.path().join("admin.wat");
+    let lib = dir.path().join("lib.wat");
+    std::fs::write(
+        &app,
+        r#"(module
+            (import "lib" "answer" (func $answer (result i32)))
+            (func (export "main") (result i32) (call $answer)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &admin,
+        r#"(module
+            (import "lib" "extra" (func $extra (result i32)))
+            (func (export "admin") (result i32) (call $extra)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &lib,
+        r#"(module
+            (func (export "answer") (result i32) (i32.const 42))
+            (func (export "extra") (result i32) (i32.const 0))
+            (func $dead (result i32) (i32.const 1)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(&app)
+        .arg(&admin)
+        .arg(&lib)
+        .args([
+            "--entry", "app", "--entry", "admin", "--prune", "--text", "-o", "-",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains(r#"(export "main""#) && text.contains(r#"(export "admin""#),
+        "both entries' exports must survive: {text}"
+    );
+    assert!(
+        !text.contains(r#"(export "answer""#) && !text.contains(r#"(export "extra""#),
+        "library exports should not survive: {text}"
+    );
+    // main, admin, answer, and extra survive; the library's $dead is pruned.
+    assert_eq!(text.matches("\n  (func").count(), 4, "{text}");
 }
 
 #[test]

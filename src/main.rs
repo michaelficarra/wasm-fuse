@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use anstream::eprintln;
 use anstyle::AnsiColor;
 use clap::{Parser, ValueEnum};
-use wasm_fuse::{ExportConflictPolicy, ExportSelection, MergeOptions, Merger};
+use wasm_fuse::{ExportConflictPolicy, MergeOptions, Merger};
 use wasmparser::WasmFeatures;
 
 /// Merge multiple WebAssembly modules into one.
@@ -33,21 +33,29 @@ struct Cli {
     #[arg(short, long)]
     text: bool,
 
-    /// Export only this module's exports
+    /// Export only the named modules' exports (repeatable)
     ///
-    /// The other modules are only used to satisfy (some of) its imports.
-    /// Without this option, the merged module exports everything every input
-    /// module exports.
+    /// The merged module keeps the exports of every listed module; the other
+    /// modules are only used to satisfy (some of) their imports.
+    /// Earlier-listed modules win export name conflicts (see
+    /// --export-conflicts). Without this option, the merged module exports
+    /// everything every input module exports.
     #[arg(long, value_name = "NAME")]
-    entry: Option<String>,
+    entry: Vec<String>,
 
-    /// How to resolve export name conflicts between modules
+    /// Keep no exports at all
+    ///
+    /// The merged module then acts only through its start functions;
+    /// combine with --prune to drop everything they do not reach.
+    #[arg(long, conflicts_with = "entry")]
+    no_exports: bool,
+
+    /// How to resolve export name conflicts between kept modules
     #[arg(
         long,
         value_enum,
         value_name = "POLICY",
-        default_value_t = ConflictPolicy::Error,
-        conflicts_with = "entry"
+        default_value_t = ConflictPolicy::Error
     )]
     export_conflicts: ConflictPolicy,
 
@@ -107,9 +115,9 @@ struct Cli {
 enum ConflictPolicy {
     /// Fail the merge when two modules export the same name
     Error,
-    /// Keep the first export and rename later ones (name_1, name_2, ...)
+    /// Keep the earlier export and rename later ones (name_1, name_2, ...)
     Rename,
-    /// Keep the first export and drop later conflicting ones
+    /// Keep the earlier export and drop later conflicting ones
     Skip,
 }
 
@@ -158,13 +166,17 @@ fn parse_module_argument(argument: &str) -> anyhow::Result<(String, PathBuf)> {
 
 fn run(cli: &Cli) -> anyhow::Result<()> {
     let options = MergeOptions {
-        exports: match &cli.entry {
-            Some(entry) => ExportSelection::Entry(entry.clone()),
-            None => ExportSelection::Union(match cli.export_conflicts {
-                ConflictPolicy::Error => ExportConflictPolicy::Error,
-                ConflictPolicy::Rename => ExportConflictPolicy::Rename,
-                ConflictPolicy::Skip => ExportConflictPolicy::Skip,
-            }),
+        entry_modules: if cli.no_exports {
+            Some(Vec::new())
+        } else if cli.entry.is_empty() {
+            None
+        } else {
+            Some(cli.entry.clone())
+        },
+        export_conflicts: match cli.export_conflicts {
+            ConflictPolicy::Error => ExportConflictPolicy::Error,
+            ConflictPolicy::Rename => ExportConflictPolicy::Rename,
+            ConflictPolicy::Skip => ExportConflictPolicy::Skip,
         },
         // The CLI deliberately has no wasm-proposal toggles: inputs are
         // accepted and the output validated with every proposal enabled.

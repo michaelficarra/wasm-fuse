@@ -16,9 +16,11 @@ way a JavaScript bundler replaces runtime module loading with build-time linking
 Imports referring to modules outside the input set are left as imports, and circular
 references between input modules are supported.
 
-The merged module's exports can be either the **union** of every input's exports
-(what `wasm-merge` produces) or, with `--entry`, just the **entry-point module's**
-exports — the other modules then only serve to satisfy (some of) its imports.
+The merged module's exports are by default the **union** of every input's exports
+(what `wasm-merge` produces); with `--entry` (repeatable), only the listed
+**entry-point modules'** exports are kept — the other modules then only serve to
+satisfy (some of) their imports. With `--no-exports`, no exports are kept at all —
+for modules whose behaviour lives in their start function.
 
 > **Status**: at full `wasm-merge` capability parity.
 
@@ -45,10 +47,14 @@ exports — the other modules then only serve to satisfy (some of) its imports.
 
 **Export selection**
 
-- Union mode: every input's exports, with duplicate names resolved by policy —
-  error (default), rename (`_1`, `_2`, …), or skip (first wins).
-- Entry-point mode: only the named module's exports; the rest merely satisfy its
-  imports.
+- By default every input's exports are kept, with duplicate names resolved by
+  policy — error (default), rename (`_1`, `_2`, …), or skip (first wins).
+- `--entry` (repeatable) keeps only the listed modules' exports; the list is a
+  priority order — on a name clash the earlier-listed module's export wins and
+  the policy handles the rest. The other modules merely satisfy imports;
+  unknown or duplicate entry names are errors.
+- `--no-exports` keeps no exports at all: the merged module acts through its
+  start functions; with `--prune` everything they do not reach is dropped.
 
 **Checking and validation**
 
@@ -73,7 +79,7 @@ exports — the other modules then only serve to satisfy (some of) its imports.
   across all item kinds and segments, with liveness flowing through fused imports.
   Declarative element segments and active segments targeting imported tables or
   memories are kept. With `--entry`, tree-shakes a bundle down to what the entry
-  module uses.
+  modules use.
 
 **Debug information**
 
@@ -118,8 +124,14 @@ wasm-fuse app.wasm libc=wasi-libc.wasm -o merged.wasm
 # Inputs may be WebAssembly text; --text/-t emits text output
 wasm-fuse first.wat second.wat --text -o merged.wat
 
-# Keep only app's exports; lib.wasm just satisfies app's imports
+# Keep only app's exports; lib.wasm just satisfies app's imports.
+# --entry is repeatable: earlier-listed modules win export name conflicts
 wasm-fuse app.wasm lib.wasm --entry app -o merged.wasm
+wasm-fuse app.wasm admin.wasm lib.wasm --entry app --entry admin -o merged.wasm
+
+# Keep no exports: the module acts through its start function; with
+# --prune everything the start functions do not reach is dropped
+wasm-fuse init.wasm lib.wasm --no-exports --prune -o merged.wasm
 
 # Tree-shake: also drop everything app's exports and the start functions
 # never reach (wasm-merge does this unconditionally; here it is opt-in)
@@ -140,8 +152,8 @@ wasm-fuse app.wasm lib.wasm \
     --source-map-url merged.wasm.map \
     -o merged.wasm
 
-# When unioning exports, pick a conflict policy: error (default),
-# rename (appends _1, _2, ...), or skip (first export wins)
+# Pick a conflict policy for duplicate export names: error (default),
+# rename (appends _1, _2, ...), or skip (earlier export wins)
 wasm-fuse a.wasm b.wasm --export-conflicts rename -o out.wasm
 ```
 
@@ -159,11 +171,12 @@ cargo add wasm-fuse --no-default-features
 (`--no-default-features` drops the CLI-only dependencies.)
 
 ```rust
-use wasm_fuse::{ExportSelection, MergeOptions, Merger};
+use wasm_fuse::{MergeOptions, Merger};
 
 let mut merger = Merger::new(MergeOptions {
-    // or ExportSelection::Union(..) to keep every module's exports
-    exports: ExportSelection::Entry("application".to_string()),
+    // keep only application's exports; `None` (the default) keeps every
+    // module's exports, and `Some(vec![])` keeps none
+    entry_modules: Some(vec!["application".to_string()]),
     ..MergeOptions::default()
 });
 merger.add_module("library", &std::fs::read("library.wasm")?)?;

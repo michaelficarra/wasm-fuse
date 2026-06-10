@@ -28,9 +28,11 @@ rustdoc; start at `src/lib.rs`.
 The CLI deliberately does NOT copy wasm-merge's flags (owner's decision): parity
 with wasm-merge is at the capability level only. Follow clap best practices
 instead. Current shape: `[NAME=]PATH` positionals (name defaults to the file
-stem), `-o/--output`, `-t/--text`, `--entry NAME` (export only that module's
-exports), `--export-conflicts <error|rename|skip>` (union mode only; clap-level
-conflict with `--entry`), `--no-validate`. There are intentionally NO
+stem), `-o/--output`, `-t/--text`, `--entry NAME` (repeatable; keep only the
+listed modules' exports, with list order winning export name conflicts),
+`--no-exports` (keep none; clap-level conflict with `--entry`),
+`--export-conflicts <error|rename|skip>` (applies to whichever exports are
+kept; composes with `--entry`), `--no-validate`. There are intentionally NO
 wasm-feature toggles: the CLI always accepts/validates with all proposals
 enabled; fine-grained `WasmFeatures` is exposed only through the library's
 `MergeOptions`.
