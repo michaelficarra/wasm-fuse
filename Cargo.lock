@@ -889,6 +889,7 @@ dependencies = [
  "clap",
  "colorchoice-clap",
  "human-panic",
+ "lazy_static",
  "snapbox",
  "tempfile",
  "thiserror",

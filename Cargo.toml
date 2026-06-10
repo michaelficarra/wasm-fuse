@@ -24,6 +24,7 @@ cli = [
     "dep:clap",
     "dep:colorchoice-clap",
     "dep:human-panic",
+    "dep:lazy_static",
     "dep:tracing",
     "dep:tracing-subscriber",
     "dep:wild",
@@ -36,22 +37,27 @@ wasmparser = "0.251"
 wasmprinter = "0.251"
 wat = "1.251"
 # error battery pack (library side)
-thiserror = "2"
+thiserror = "2.0.18"
 
 # cli battery pack (all optional, enabled by the `cli` feature)
 anstream = { version = "1.0.0", optional = true }
 anstyle = { version = "1.0.14", optional = true }
-anyhow = { version = "1", optional = true }
-clap = { version = "4", features = ["derive"], optional = true }
+anyhow = { version = "1.0.102", optional = true }
+clap = { version = "4.6.1", features = ["derive"], optional = true }
 colorchoice-clap = { version = "1.0.8", optional = true }
 human-panic = { version = "2.0.8", optional = true }
 wild = { version = "2.2.1", optional = true }
 
 # logging battery pack (CLI diagnostics)
-tracing = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+tracing = { version = "0.1.44", optional = true }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"], optional = true }
+
+# Not used directly: transitive dependencies of tracing-subscriber that
+# declare too-low minimums of their own dependencies; raised here so the
+# minimal-versions CI job builds.
+lazy_static = { version = "1.5.0", optional = true }
 
 [dev-dependencies]
-snapbox = { version = "1.2.1", features = ["cmd"] }
+snapbox = { version = "1.2.2", features = ["cmd"] }
 tempfile = "3.27.0"
 wat = "1.251"
