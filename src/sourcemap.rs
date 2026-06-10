@@ -139,9 +139,10 @@ pub(crate) fn parse(module: &str, json: &[u8]) -> Result<InputSourceMap, MergeEr
     })
 }
 
-/// Per emitted function, in code-section order: the originating module and
-/// the recorded (input absolute offset, output body-relative offset) pairs.
-pub(crate) type CodeOffsets = Vec<(usize, Vec<(usize, u32)>)>;
+/// Per emitted function, in code-section order: for each instruction, its
+/// source module, input absolute offset, and output body-relative offset.
+/// Inlined instructions carry their own source module.
+pub(crate) type CodeOffsets = Vec<Vec<(usize, usize, u32)>>;
 
 /// Build the merged source map from the inputs' maps, the offset log recorded
 /// during emission, and the final merged binary (parsed to locate where each
@@ -164,13 +165,14 @@ pub(crate) fn build(
     // synthetic start function at the end of the code section has no log
     // entry and no mappings.
     let mut translate: HashMap<(usize, usize), u64> = HashMap::new();
-    for (ordinal, (module_idx, offsets)) in code_offsets.iter().enumerate() {
+    for (ordinal, offsets) in code_offsets.iter().enumerate() {
         let body_start = body_starts[ordinal];
-        for &(input_offset, output_relative) in offsets {
-            translate.insert(
-                (*module_idx, input_offset),
-                (body_start + output_relative as usize) as u64,
-            );
+        for &(instr_module, input_offset, output_relative) in offsets {
+            // First entry wins: synthetic inline prologues share the call
+            // instruction's offset, and the splice start is the best target.
+            translate
+                .entry((instr_module, input_offset))
+                .or_insert((body_start + output_relative as usize) as u64);
         }
     }
 

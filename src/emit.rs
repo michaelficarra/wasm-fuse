@@ -10,11 +10,12 @@ use wasm_encoder::{
     StartSection, TableSection, TagSection, TypeSection,
 };
 
+use crate::inline::InlinePlan;
 use crate::merge::{ExportConflictPolicy, ExportSelection, MergeError, MergeOptions};
 use crate::parse::{Kind, ParsedModule};
 use crate::prune::Liveness;
 use crate::remap::{Remapper, flatten_error};
-use crate::resolve::Layout;
+use crate::resolve::{Layout, Resolution, Site};
 use crate::types::TypeCanon;
 
 /// An export that survives export selection, with conflicts already resolved.
@@ -107,11 +108,14 @@ pub(crate) struct EmitConfig<'a> {
     pub(crate) track_offsets: bool,
     /// Embed this URL in a `sourceMappingURL` custom section.
     pub(crate) source_map_url: Option<&'a str>,
+    /// Which functions to inline at their single call site.
+    pub(crate) plan: &'a InlinePlan,
 }
 
 pub(crate) fn emit(
     parsed: &[ParsedModule<'_>],
     layout: &Layout,
+    resolution: &mut Resolution<'_>,
     config: &EmitConfig<'_>,
 ) -> Result<(Vec<u8>, crate::sourcemap::CodeOffsets), MergeError> {
     let EmitConfig {
@@ -121,6 +125,7 @@ pub(crate) fn emit(
         name_section,
         track_offsets,
         source_map_url,
+        plan,
     } = *config;
     let def_live = |kind: Kind, module: usize, def_index: u32| {
         live.is_none_or(|live| live.def(kind, module, def_index))
@@ -189,7 +194,12 @@ pub(crate) fn emit(
     for (module_idx, input) in parsed.iter().enumerate() {
         let mut remapper = remapper(module_idx);
         for (def_index, &type_index) in input.func_types.iter().enumerate() {
-            if !def_live(Kind::Func, module_idx, def_index as u32) {
+            let site = Site::Def {
+                module: module_idx,
+                def_index: def_index as u32,
+            };
+            // Inlined functions get neither a declaration nor a body.
+            if !def_live(Kind::Func, module_idx, def_index as u32) || plan.get(site).is_some() {
                 continue;
             }
             functions.function(
@@ -332,10 +342,21 @@ pub(crate) fn emit(
     let mut code = CodeSection::new();
     let mut merged_hints: BTreeMap<u32, Vec<wasm_encoder::BranchHint>> = BTreeMap::new();
     let mut code_offsets: crate::sourcemap::CodeOffsets = Vec::new();
+    let splice_ctx = SpliceContext {
+        parsed,
+        layout,
+        plan,
+    };
     for (module_idx, input) in parsed.iter().enumerate() {
         let import_count = input.import_count(Kind::Func);
         for (def_index, body) in input.code.iter().enumerate() {
-            if !def_live(Kind::Func, module_idx, def_index as u32) {
+            let site = Site::Def {
+                module: module_idx,
+                def_index: def_index as u32,
+            };
+            // Inlined functions are not emitted: their bodies live inside
+            // their callers.
+            if !def_live(Kind::Func, module_idx, def_index as u32) || plan.get(site).is_some() {
                 continue;
             }
             let local_index = import_count + def_index as u32;
@@ -344,16 +365,45 @@ pub(crate) fn emit(
                 .iter()
                 .find(|(func, _)| *func == local_index)
                 .map(|(_, hints)| hints);
+            let want_offsets = track_offsets || hints.is_some();
 
-            let mut offsets = Vec::new();
-            let mut remapper = Remapper {
-                module_name: &input.name,
-                tables: &layout.remaps[module_idx],
-                instruction_offsets: (track_offsets || hints.is_some()).then_some(&mut offsets),
+            // (module, input offset, output offset within the new body) per
+            // emitted instruction; inlined instructions carry their own
+            // source module.
+            let mut offsets: Vec<(usize, usize, u32)> = Vec::new();
+            let instances = if plan.is_empty() {
+                Vec::new()
+            } else {
+                let mut instances = Vec::new();
+                collect_instances(&splice_ctx, resolution, module_idx, body, &mut instances)?;
+                instances
             };
-            remapper
-                .parse_function_body(&mut code, body.clone())
-                .map_err(in_module(module_idx))?;
+            if instances.is_empty() {
+                let mut pairs = Vec::new();
+                let mut remapper = Remapper {
+                    module_name: &input.name,
+                    tables: &layout.remaps[module_idx],
+                    instruction_offsets: want_offsets.then_some(&mut pairs),
+                };
+                remapper
+                    .parse_function_body(&mut code, body.clone())
+                    .map_err(in_module(module_idx))?;
+                offsets.extend(
+                    pairs
+                        .into_iter()
+                        .map(|(input, output)| (module_idx, input, output)),
+                );
+            } else {
+                splice_function(
+                    &splice_ctx,
+                    resolution,
+                    module_idx,
+                    def_index as u32,
+                    &instances,
+                    &mut code,
+                    want_offsets.then_some(&mut offsets),
+                )?;
+            }
 
             if let Some(hints) = hints {
                 let body_start = body.range().start;
@@ -361,11 +411,13 @@ pub(crate) fn emit(
                     .iter()
                     .filter_map(|hint| {
                         let input_offset = body_start + hint.func_offset as usize;
-                        let at = offsets
-                            .binary_search_by_key(&input_offset, |&(input, _)| input)
-                            .ok()?; // hints pointing at no instruction are dropped
+                        // Entries of inlined callees are interleaved, so find
+                        // this function's own instruction by module + offset.
+                        let (_, _, output) = offsets
+                            .iter()
+                            .find(|&&(m, input, _)| m == module_idx && input == input_offset)?;
                         Some(wasm_encoder::BranchHint {
-                            branch_func_offset: offsets[at].1,
+                            branch_func_offset: *output,
                             branch_hint_value: hint.taken.into(),
                         })
                     })
@@ -379,7 +431,7 @@ pub(crate) fn emit(
                 }
             }
             if track_offsets {
-                code_offsets.push((module_idx, offsets));
+                code_offsets.push(offsets);
             }
         }
     }
@@ -433,4 +485,305 @@ pub(crate) fn emit(
     }
 
     Ok((module.finish(), code_offsets))
+}
+
+/// Shared state for splicing inlined bodies into their callers.
+struct SpliceContext<'a, 'p> {
+    parsed: &'a [ParsedModule<'p>],
+    layout: &'a Layout,
+    plan: &'a InlinePlan,
+}
+
+impl SpliceContext<'_, '_> {
+    fn remapper(&self, module_idx: usize) -> Remapper<'_> {
+        Remapper {
+            module_name: &self.parsed[module_idx].name,
+            tables: &self.layout.remaps[module_idx],
+            instruction_offsets: None,
+        }
+    }
+
+    fn invalid(&self, module_idx: usize) -> impl Fn(wasmparser::BinaryReaderError) -> MergeError {
+        let name = self.parsed[module_idx].name.clone();
+        move |source| MergeError::InvalidModule {
+            name: name.clone(),
+            source,
+        }
+    }
+}
+
+/// Find, in pre-order, every inlined call inside `body` (and transitively
+/// inside the bodies it inlines) — the same traversal the splicer performs.
+fn collect_instances(
+    ctx: &SpliceContext<'_, '_>,
+    resolution: &mut Resolution<'_>,
+    module_idx: usize,
+    body: &wasmparser::FunctionBody<'_>,
+    out: &mut Vec<Site>,
+) -> Result<(), MergeError> {
+    let mut reader = body
+        .get_operators_reader()
+        .map_err(ctx.invalid(module_idx))?;
+    while !reader.eof() {
+        if let wasmparser::Operator::Call { function_index } =
+            reader.read().map_err(ctx.invalid(module_idx))?
+        {
+            let target = resolution.resolve(Kind::Func, module_idx, function_index)?;
+            if let Some(inlinee) = ctx.plan.get(target) {
+                out.push(target);
+                let callee_body = &ctx.parsed[inlinee.module].code[inlinee.def_index as usize];
+                collect_instances(ctx, resolution, inlinee.module, callee_body, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Emit one function with its inlined callees spliced in.
+fn splice_function(
+    ctx: &SpliceContext<'_, '_>,
+    resolution: &mut Resolution<'_>,
+    module_idx: usize,
+    def_index: u32,
+    instances: &[Site],
+    code: &mut CodeSection,
+    mut offsets: Option<&mut Vec<(usize, usize, u32)>>,
+) -> Result<(), MergeError> {
+    let body = &ctx.parsed[module_idx].code[def_index as usize];
+
+    // Locals: the caller's own declared locals, then one run per inline
+    // instance (the callee's parameters followed by its declared locals).
+    // Bases index the instances in pre-order, matching the walk below.
+    let mut locals: Vec<(u32, wasm_encoder::ValType)> = Vec::new();
+    let push_local =
+        |locals: &mut Vec<(u32, wasm_encoder::ValType)>, ty: wasm_encoder::ValType| match locals
+            .last_mut()
+        {
+            Some((count, last)) if *last == ty => *count += 1,
+            _ => locals.push((1, ty)),
+        };
+    let mut total = ctx.plan.param_count(module_idx, def_index);
+    let mut locals_reader = body.get_locals_reader().map_err(ctx.invalid(module_idx))?;
+    for _ in 0..locals_reader.get_count() {
+        let (count, ty) = locals_reader.read().map_err(ctx.invalid(module_idx))?;
+        let ty = ctx
+            .remapper(module_idx)
+            .val_type(ty)
+            .map_err(|error| flatten_error(error, &ctx.parsed[module_idx].name))?;
+        for _ in 0..count {
+            push_local(&mut locals, ty);
+        }
+        total += count;
+    }
+    let mut bases = Vec::with_capacity(instances.len());
+    for &site in instances {
+        let inlinee = ctx.plan.get(site).expect("instances come from the plan");
+        bases.push(total);
+        for &ty in inlinee.params.iter().chain(&inlinee.locals) {
+            let ty = ctx
+                .remapper(inlinee.module)
+                .val_type(ty)
+                .map_err(|error| flatten_error(error, &ctx.parsed[inlinee.module].name))?;
+            push_local(&mut locals, ty);
+            total += 1;
+        }
+    }
+
+    let mut function = Function::new(locals);
+    let mut next_instance = 0usize;
+    let mut reader = body
+        .get_operators_reader()
+        .map_err(ctx.invalid(module_idx))?;
+    walk(
+        ctx,
+        resolution,
+        &mut function,
+        module_idx,
+        &mut reader,
+        0,
+        false,
+        &bases,
+        &mut next_instance,
+        &mut offsets,
+    )?;
+    code.function(&function);
+    Ok(())
+}
+
+/// Re-encode one body into `function`, splicing inlined callees at their call
+/// sites. Within an inlinee, locals shift by `local_base` and `return`
+/// becomes a branch to the wrapper block (whose depth is tracked here).
+#[expect(clippy::too_many_arguments)]
+fn walk(
+    ctx: &SpliceContext<'_, '_>,
+    resolution: &mut Resolution<'_>,
+    function: &mut Function,
+    module_idx: usize,
+    reader: &mut wasmparser::OperatorsReader<'_>,
+    local_base: u32,
+    inlinee: bool,
+    bases: &[u32],
+    next_instance: &mut usize,
+    offsets: &mut Option<&mut Vec<(usize, usize, u32)>>,
+) -> Result<(), MergeError> {
+    use wasmparser::Operator;
+
+    let mut depth: u32 = 0;
+    while !reader.eof() {
+        let input_offset = reader.original_position();
+        let operator = reader.clone().read().map_err(ctx.invalid(module_idx))?;
+        match operator {
+            Operator::Call { function_index } => {
+                let target = resolution.resolve(Kind::Func, module_idx, function_index)?;
+                if let Some(inl) = ctx.plan.get(target) {
+                    reader.read().map_err(ctx.invalid(module_idx))?; // consume the call
+                    let base = bases[*next_instance];
+                    *next_instance += 1;
+                    let in_callee = |error| flatten_error(error, &ctx.parsed[inl.module].name);
+
+                    // Arguments are on the stack with the last parameter on
+                    // top: assign the fresh locals in reverse.
+                    for param in (0..inl.params.len() as u32).rev() {
+                        if let Some(o) = offsets.as_deref_mut() {
+                            o.push((module_idx, input_offset, function.byte_len() as u32));
+                        }
+                        function.instruction(&Instruction::LocalSet(base + param));
+                    }
+                    // The call site may execute more than once, but locals
+                    // are only zero-initialised at function entry: re-zero
+                    // the defaultable declared locals, except where the plan
+                    // proved the local is written before any read (or never
+                    // read). Non-defaultable ones are written before read by
+                    // validation.
+                    for (index, &ty) in inl.locals.iter().enumerate() {
+                        if !inl.zero_locals[index] {
+                            continue;
+                        }
+                        let Some(zero) =
+                            zero_value(&mut ctx.remapper(inl.module), ty).map_err(in_callee)?
+                        else {
+                            continue;
+                        };
+                        let local = base + inl.params.len() as u32 + index as u32;
+                        if let Some(o) = offsets.as_deref_mut() {
+                            o.push((module_idx, input_offset, function.byte_len() as u32));
+                        }
+                        function.instruction(&zero);
+                        function.instruction(&Instruction::LocalSet(local));
+                    }
+                    // A body containing `return` is wrapped in a block; each
+                    // `return` becomes a branch to it.
+                    if inl.has_return {
+                        let block_type = match inl.results[..] {
+                            [] => wasm_encoder::BlockType::Empty,
+                            [ty] => wasm_encoder::BlockType::Result(
+                                ctx.remapper(inl.module).val_type(ty).map_err(in_callee)?,
+                            ),
+                            _ => unreachable!("excluded by inline::plan"),
+                        };
+                        if let Some(o) = offsets.as_deref_mut() {
+                            o.push((module_idx, input_offset, function.byte_len() as u32));
+                        }
+                        function.instruction(&Instruction::Block(block_type));
+                    }
+                    let callee_body = &ctx.parsed[inl.module].code[inl.def_index as usize];
+                    let mut callee_reader = callee_body
+                        .get_operators_reader()
+                        .map_err(ctx.invalid(inl.module))?;
+                    walk(
+                        ctx,
+                        resolution,
+                        function,
+                        inl.module,
+                        &mut callee_reader,
+                        base,
+                        true,
+                        bases,
+                        next_instance,
+                        offsets,
+                    )?;
+                    if inl.has_return {
+                        function.instruction(&Instruction::End);
+                    }
+                    continue;
+                }
+            }
+            Operator::Return if inlinee => {
+                reader.read().map_err(ctx.invalid(module_idx))?;
+                if let Some(o) = offsets.as_deref_mut() {
+                    o.push((module_idx, input_offset, function.byte_len() as u32));
+                }
+                function.instruction(&Instruction::Br(depth));
+                continue;
+            }
+            Operator::End => {
+                if depth == 0 {
+                    // The body's final `end`: an inlinee's is dropped (the
+                    // wrapper block supplies its own), the caller's is kept.
+                    reader.read().map_err(ctx.invalid(module_idx))?;
+                    if !inlinee {
+                        if let Some(o) = offsets.as_deref_mut() {
+                            o.push((module_idx, input_offset, function.byte_len() as u32));
+                        }
+                        function.instruction(&Instruction::End);
+                    }
+                    return Ok(());
+                }
+                depth -= 1;
+            }
+            Operator::Block { .. }
+            | Operator::Loop { .. }
+            | Operator::If { .. }
+            | Operator::TryTable { .. }
+            | Operator::Try { .. } => depth += 1,
+            Operator::Delegate { .. } => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+
+        let instruction = ctx
+            .remapper(module_idx)
+            .parse_instruction(reader)
+            .map_err(|error| flatten_error(error, &ctx.parsed[module_idx].name))?;
+        let instruction = shift_locals(instruction, local_base);
+        if let Some(o) = offsets.as_deref_mut() {
+            o.push((module_idx, input_offset, function.byte_len() as u32));
+        }
+        function.instruction(&instruction);
+    }
+    Err(MergeError::Reencode {
+        module: ctx.parsed[module_idx].name.clone(),
+        message: "function body ended without a final end".to_string(),
+    })
+}
+
+/// Shift local indices by an inline instance's base.
+fn shift_locals(instruction: Instruction<'_>, base: u32) -> Instruction<'_> {
+    if base == 0 {
+        return instruction;
+    }
+    match instruction {
+        Instruction::LocalGet(index) => Instruction::LocalGet(index + base),
+        Instruction::LocalSet(index) => Instruction::LocalSet(index + base),
+        Instruction::LocalTee(index) => Instruction::LocalTee(index + base),
+        other => other,
+    }
+}
+
+/// The zero value for a defaultable type, or `None` for non-defaultable ones.
+fn zero_value(
+    remapper: &mut Remapper<'_>,
+    ty: wasmparser::ValType,
+) -> Result<Option<Instruction<'static>>, wasm_encoder::reencode::Error<MergeError>> {
+    use wasmparser::ValType;
+    Ok(match ty {
+        ValType::I32 => Some(Instruction::I32Const(0)),
+        ValType::I64 => Some(Instruction::I64Const(0)),
+        ValType::F32 => Some(Instruction::F32Const(0.0f32.into())),
+        ValType::F64 => Some(Instruction::F64Const(0.0f64.into())),
+        ValType::V128 => Some(Instruction::V128Const(0)),
+        ValType::Ref(ref_type) if ref_type.is_nullable() => Some(Instruction::RefNull(
+            remapper.heap_type(ref_type.heap_type())?,
+        )),
+        ValType::Ref(_) => None,
+    })
 }

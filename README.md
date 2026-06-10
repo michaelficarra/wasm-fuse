@@ -59,8 +59,16 @@ exports — the other modules then only serve to satisfy (some of) its imports.
 - The merged output is validated; inputs are not (one may only become valid once
   merged). `--no-validate` skips both.
 
-**Pruning (opt-in)**
+**Optimisation (opt-in)**
 
+- `--inline` splices every function with exactly one call site into its caller and
+  removes it — when nothing else references it (exports, start, `ref.func`, tail
+  calls, element segments) and it is not recursive. Parameters become fresh locals
+  assigned from the stack; declared defaultable locals are re-zeroed at the splice
+  unless provably written before read (or never read); `return` instructions become
+  branches to a wrapper block. Chains inline transitively; inlining works across
+  module boundaries through fused imports, and inlined code keeps its source-map
+  attribution.
 - `--prune` drops everything unreachable from the kept exports and start functions,
   across all item kinds and segments, with liveness flowing through fused imports.
   Declarative element segments and active segments targeting imported tables or

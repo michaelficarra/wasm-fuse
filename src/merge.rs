@@ -3,7 +3,7 @@
 
 use wasmparser::WasmFeatures;
 
-use crate::{check, emit, names, parse, prune, resolve, sourcemap, types};
+use crate::{check, emit, inline, names, parse, prune, resolve, sourcemap, types};
 
 /// What to do when two input modules export the same name (in
 /// [`ExportSelection::Union`] mode).
@@ -68,6 +68,14 @@ pub struct MergeOptions {
     /// pointing consumers at the merged source map (wasm-merge's
     /// `--output-source-map-url`).
     pub source_map_url: Option<String>,
+    /// Inline every function that has exactly one call site and no other
+    /// references (not exported, not a start function, never used by
+    /// `ref.func`, tail calls, or element segments, and not recursive). The
+    /// inlined function is removed from the output — by construction nothing
+    /// can observe it from inside the module. Parameters become fresh locals
+    /// in the caller; `return` instructions become branches. Off by default,
+    /// like pruning: merging alone never transforms code.
+    pub inline_single_use: bool,
     /// Produce a wasm-split manifest in [`Merged::manifest`]: for every
     /// module except the first (primary) one, its name followed by the
     /// post-merge names of its surviving defined functions. Implies
@@ -86,6 +94,7 @@ impl Default for MergeOptions {
             prune_unused: false,
             keep_names: false,
             source_map_url: None,
+            inline_single_use: false,
             emit_manifest: false,
         }
     }
@@ -298,7 +307,18 @@ impl Merger {
         } else {
             None
         };
-        let layout = resolve::layout(&parsed, &mut resolution, liveness.as_ref(), &canon)?;
+        let inline_plan = if self.options.inline_single_use {
+            inline::plan(&parsed, &mut resolution, &exports, liveness.as_ref())?
+        } else {
+            inline::InlinePlan::default()
+        };
+        let layout = resolve::layout(
+            &parsed,
+            &mut resolution,
+            liveness.as_ref(),
+            &canon,
+            &inline_plan.sites(),
+        )?;
         if self.options.validate {
             check::check_fused(&parsed, &mut resolution, &canon)?;
         }
@@ -339,8 +359,9 @@ impl Merger {
             name_section: name_section.as_ref(),
             track_offsets,
             source_map_url: self.options.source_map_url.as_deref(),
+            plan: &inline_plan,
         };
-        let (output, code_offsets) = emit::emit(&parsed, &layout, &config)?;
+        let (output, code_offsets) = emit::emit(&parsed, &layout, &mut resolution, &config)?;
 
         let source_map = if track_offsets {
             let maps: Vec<_> = self

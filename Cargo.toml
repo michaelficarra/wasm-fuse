@@ -30,6 +30,10 @@ required-features = ["cli"]
 name = "source_map"
 required-features = ["cli"]
 
+[[test]]
+name = "inline"
+required-features = ["cli"]
+
 [features]
 default = ["cli"]
 # Everything the binary needs beyond the library; library consumers can use

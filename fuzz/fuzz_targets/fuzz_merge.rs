@@ -28,6 +28,7 @@ fuzz_target!(|data: &[u8]| {
         prune_unused: unstructured.arbitrary().unwrap_or(false),
         keep_names: unstructured.arbitrary().unwrap_or(false),
         emit_manifest: unstructured.arbitrary().unwrap_or(false),
+        inline_single_use: unstructured.arbitrary().unwrap_or(false),
         ..MergeOptions::default()
     };
 

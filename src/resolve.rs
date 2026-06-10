@@ -8,7 +8,7 @@
 //! everything that resolves to the same site shares one slot in the merged
 //! module.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use wasmparser::Operator;
 
@@ -127,8 +127,14 @@ pub(crate) fn layout(
     resolution: &mut Resolution<'_>,
     live: Option<&Liveness>,
     canon: &TypeCanon,
+    inlined: &HashSet<Site>,
 ) -> Result<Layout, MergeError> {
-    let item_live = |kind: Kind, site: Site| live.is_none_or(|live| live.item(kind, site));
+    // Inlined functions get no index of their own: their bodies live inside
+    // their callers, and nothing else references them by construction.
+    let item_live = |kind: Kind, site: Site| {
+        live.is_none_or(|live| live.item(kind, site))
+            && !(kind == Kind::Func && inlined.contains(&site))
+    };
 
     // Surviving imports come first in each index space, in module order. An
     // import survives only if it resolves to itself (anything else remaps to

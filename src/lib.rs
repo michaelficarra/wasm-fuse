@@ -35,6 +35,7 @@
 //! ```
 mod check;
 mod emit;
+mod inline;
 mod merge;
 mod names;
 mod parse;

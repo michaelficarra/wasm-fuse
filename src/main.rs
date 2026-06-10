@@ -76,6 +76,14 @@ struct Cli {
     #[arg(long, value_name = "URL")]
     source_map_url: Option<String>,
 
+    /// Inline functions that have exactly one call site
+    ///
+    /// Such functions are spliced into their caller and removed, when
+    /// nothing else (exports, tables, ref.func, the start section)
+    /// references them.
+    #[arg(long)]
+    inline: bool,
+
     /// Write a wasm-split manifest to this path (implies --keep-names)
     ///
     /// Lists, for every module except the first, the post-merge names of
@@ -165,6 +173,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         prune_unused: cli.prune,
         keep_names: cli.keep_names,
         source_map_url: cli.source_map_url.clone(),
+        inline_single_use: cli.inline,
         emit_manifest: cli.output_manifest.is_some(),
     };
 

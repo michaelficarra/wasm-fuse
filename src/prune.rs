@@ -250,22 +250,22 @@ pub(crate) fn compute_liveness(
 
 /// Module-local indices referenced by one item.
 #[derive(Default)]
-struct Collected {
-    funcs: Vec<u32>,
-    tables: Vec<u32>,
-    memories: Vec<u32>,
-    globals: Vec<u32>,
-    tags: Vec<u32>,
-    elems: Vec<u32>,
-    datas: Vec<u32>,
+pub(crate) struct Collected {
+    pub(crate) funcs: Vec<u32>,
+    pub(crate) tables: Vec<u32>,
+    pub(crate) memories: Vec<u32>,
+    pub(crate) globals: Vec<u32>,
+    pub(crate) tags: Vec<u32>,
+    pub(crate) elems: Vec<u32>,
+    pub(crate) datas: Vec<u32>,
 }
 
 /// A [`Reencode`] implementation whose index hooks record every reference
 /// (and map it to itself). Re-encoding an item into a throwaway section
 /// thereby collects exactly the indices the item uses, with the operator
 /// walking maintained upstream.
-struct Collector<'a> {
-    refs: &'a mut Collected,
+pub(crate) struct Collector<'a> {
+    pub(crate) refs: &'a mut Collected,
 }
 
 impl Reencode for Collector<'_> {
