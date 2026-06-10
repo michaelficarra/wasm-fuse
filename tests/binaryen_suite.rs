@@ -369,9 +369,38 @@ fn sourcemap() {
 }
 
 #[test]
-#[ignore = "code annotations are not yet supported (PLAN.md phase 4)"]
 fn annotations() {
-    unimplemented!("port annotations.wat once annotations are preserved");
+    // Branch hints (metadata.code.branch_hint) survive the merge with their
+    // function indices and instruction offsets remapped. The fixture's
+    // binaryen-proprietary (@binaryen.js.called) annotation is dropped by the
+    // wat crate at parse time and cannot be preserved. NB: the wat crate
+    // attaches a folded-form hint to the first instruction of the unfolded
+    // condition (i32.const), and the merge preserves that input encoding
+    // byte-for-byte; binaryen's own parser attaches it to the `if`.
+    let text = merge_to_text(
+        &[
+            ("annotations.wat", "first"),
+            ("annotations.wat.second", "second"),
+        ],
+        &[],
+    );
+    assert!(
+        text.matches("(@metadata.code.branch_hint \"\\00\")")
+            .count()
+            == 1
+            && text
+                .matches("(@metadata.code.branch_hint \"\\01\")")
+                .count()
+                == 1,
+        "both modules' hints should survive: {text}"
+    );
+    assert_data_eq!(text, file!["snapshots/annotations.wat"]);
+}
+
+#[test]
+#[ignore = "tests only the binaryen-proprietary @binaryen.js.called annotation, which the wat crate does not represent"]
+fn annotations_func_only() {
+    unimplemented!("not portable: the annotation never reaches the encoded module");
 }
 
 #[test]

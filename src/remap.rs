@@ -54,6 +54,11 @@ impl RemapTables {
 pub(crate) struct Remapper<'a> {
     pub(crate) module_name: &'a str,
     pub(crate) tables: &'a RemapTables,
+    /// When set, [`Reencode::parse_function_body`] records, per instruction,
+    /// the input offset (absolute, within the input binary) and the output
+    /// offset (relative to the start of the re-encoded function body) — the
+    /// basis for translating branch hints and source maps.
+    pub(crate) instruction_offsets: Option<&'a mut Vec<(usize, u32)>>,
 }
 
 impl Remapper<'_> {
@@ -113,6 +118,28 @@ impl Reencode for Remapper<'_> {
 
     fn data_index(&mut self, data: u32) -> Result<u32, ReencodeError<MergeError>> {
         self.map(&self.tables.datas, data, "data segment")
+    }
+
+    // As the default implementation, with optional per-instruction offset
+    // recording.
+    fn parse_function_body(
+        &mut self,
+        code: &mut wasm_encoder::CodeSection,
+        func: wasmparser::FunctionBody<'_>,
+    ) -> Result<(), ReencodeError<MergeError>> {
+        let mut function = self.new_function_with_parsed_locals(&func)?;
+        let mut reader = func.get_operators_reader()?;
+        while !reader.eof() {
+            let input_offset = reader.original_position();
+            let output_offset = function.byte_len() as u32;
+            let instruction = self.parse_instruction(&mut reader)?;
+            function.instruction(&instruction);
+            if let Some(offsets) = self.instruction_offsets.as_deref_mut() {
+                offsets.push((input_offset, output_offset));
+            }
+        }
+        code.function(&function);
+        Ok(())
     }
 }
 

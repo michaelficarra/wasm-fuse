@@ -1,7 +1,7 @@
 //! Emission of the merged module: every section is rebuilt from the input
 //! modules' items, re-encoded with merged indices.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use wasm_encoder::reencode::Reencode;
 use wasm_encoder::{
@@ -112,6 +112,7 @@ pub(crate) fn emit(
     let remapper = |module_idx: usize| Remapper {
         module_name: &parsed[module_idx].name,
         tables: &layout.remaps[module_idx],
+        instruction_offsets: None,
     };
     // Attribute re-encoding failures to the module whose item we're encoding.
     let in_module = |module_idx: usize| move |error| flatten_error(error, &parsed[module_idx].name);
@@ -305,16 +306,57 @@ pub(crate) fn emit(
         module.section(&DataCountSection { count: live_datas });
     }
 
+    // Code, while translating branch hints: a hint's offset (relative to its
+    // function's body) is mapped through the per-instruction offsets recorded
+    // during re-encoding — remapped indices can change instruction widths.
     let mut code = CodeSection::new();
+    let mut merged_hints: BTreeMap<u32, Vec<wasm_encoder::BranchHint>> = BTreeMap::new();
     for (module_idx, input) in parsed.iter().enumerate() {
-        let mut remapper = remapper(module_idx);
+        let import_count = input.import_count(Kind::Func);
         for (def_index, body) in input.code.iter().enumerate() {
             if !def_live(Kind::Func, module_idx, def_index as u32) {
                 continue;
             }
+            let local_index = import_count + def_index as u32;
+            let hints = input
+                .branch_hints
+                .iter()
+                .find(|(func, _)| *func == local_index)
+                .map(|(_, hints)| hints);
+
+            let mut offsets = Vec::new();
+            let mut remapper = Remapper {
+                module_name: &input.name,
+                tables: &layout.remaps[module_idx],
+                instruction_offsets: hints.is_some().then_some(&mut offsets),
+            };
             remapper
                 .parse_function_body(&mut code, body.clone())
                 .map_err(in_module(module_idx))?;
+
+            if let Some(hints) = hints {
+                let body_start = body.range().start;
+                let translated: Vec<_> = hints
+                    .iter()
+                    .filter_map(|hint| {
+                        let input_offset = body_start + hint.func_offset as usize;
+                        let at = offsets
+                            .binary_search_by_key(&input_offset, |&(input, _)| input)
+                            .ok()?; // hints pointing at no instruction are dropped
+                        Some(wasm_encoder::BranchHint {
+                            branch_func_offset: offsets[at].1,
+                            branch_hint_value: hint.taken.into(),
+                        })
+                    })
+                    .collect();
+                if !translated.is_empty() {
+                    let merged_index = layout.remaps[module_idx].funcs[local_index as usize];
+                    merged_hints
+                        .entry(merged_index)
+                        .or_default()
+                        .extend(translated);
+                }
+            }
         }
     }
     if synthetic_start.is_some() {
@@ -324,6 +366,14 @@ pub(crate) fn emit(
         }
         start.instruction(&Instruction::End);
         code.function(&start);
+    }
+    // The branch-hint custom section must precede the code section.
+    if !merged_hints.is_empty() {
+        let mut hints = wasm_encoder::BranchHints::new();
+        for (function_index, function_hints) in &merged_hints {
+            hints.function_hints(*function_index, function_hints.iter().copied());
+        }
+        module.section(&hints);
     }
     if !code.is_empty() {
         module.section(&code);

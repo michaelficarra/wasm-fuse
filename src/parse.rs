@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
 use wasmparser::{
-    Data, Element, Export, ExternalKind, FunctionBody, Global, Import, KnownCustom, MemoryType,
-    Name, Parser, Payload, RecGroup, Table, TagType, TypeRef,
+    BranchHint, Data, Element, Export, ExternalKind, FunctionBody, Global, Import, KnownCustom,
+    MemoryType, Name, Parser, Payload, RecGroup, Table, TagType, TypeRef,
 };
 
 use crate::merge::MergeError;
@@ -105,6 +105,9 @@ pub(crate) struct ParsedModule<'a> {
     pub(crate) has_data_count: bool,
     /// Entries of the "name" custom section, kept for `keep_names`.
     pub(crate) names: Vec<Name<'a>>,
+    /// Branch hints (`metadata.code.branch_hint`), per module-local function
+    /// index, with offsets relative to that function's body.
+    pub(crate) branch_hints: Vec<(u32, Vec<BranchHint>)>,
 }
 
 impl<'a> ParsedModule<'a> {
@@ -159,6 +162,7 @@ pub(crate) fn parse_module<'a>(
         code: Vec::new(),
         has_data_count: false,
         names: Vec::new(),
+        branch_hints: Vec::new(),
     };
 
     let invalid = |source: wasmparser::BinaryReaderError| MergeError::InvalidModule {
@@ -227,10 +231,10 @@ pub(crate) fn parse_module<'a>(
                 }
             }
             Payload::CodeSectionEntry(body) => module.code.push(body),
-            Payload::CustomSection(section) => {
-                // Names are advisory debug info: a malformed name subsection
-                // is skipped rather than failing the merge.
-                if let KnownCustom::Name(reader) = section.as_known() {
+            Payload::CustomSection(section) => match section.as_known() {
+                // Names and branch hints are advisory: a malformed entry is
+                // skipped rather than failing the merge.
+                KnownCustom::Name(reader) => {
                     for entry in reader {
                         match entry {
                             Ok(name) => module.names.push(name),
@@ -238,9 +242,23 @@ pub(crate) fn parse_module<'a>(
                         }
                     }
                 }
+                KnownCustom::BranchHints(reader) => {
+                    'section: for entry in reader {
+                        let Ok(function) = entry else { break };
+                        let mut hints = Vec::new();
+                        for hint in function.hints {
+                            match hint {
+                                Ok(hint) => hints.push(hint),
+                                Err(_) => break 'section,
+                            }
+                        }
+                        module.branch_hints.push((function.func, hints));
+                    }
+                }
                 // Other custom sections are dropped for now; see PLAN.md
-                // phase 4 (source maps, annotations).
-            }
+                // phase 4 (source maps).
+                _ => {}
+            },
             _ => {}
         }
     }

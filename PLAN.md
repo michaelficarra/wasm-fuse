@@ -157,11 +157,20 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       is named `merged.start.combined` like wasm-merge. Malformed name subsections are
       skipped (advisory data), never a merge failure. `names.wat` ported with and
       without the flag.
-- [ ] Source maps: `-ism` per input, `-osm`, `-osu` (`sourcemap.wat`). Needs
-      input-offset → output-offset tracking through code re-encoding (override
-      parse_function_body to record per-instruction positions).
-- [ ] Code annotations / branch hints (`annotations.wat`, `annotations-func-only.wat`)
-      — same offset-tracking infrastructure.
+- [x] Branch hints (`annotations.wat`): the `metadata.code.branch_hint` section is
+      preserved unconditionally (like wasm-merge), with function indices remapped and
+      instruction offsets translated through per-instruction offset recording in
+      `Remapper::parse_function_body` (remapped indices can change instruction widths).
+      Hints of pruned functions are dropped; hints pointing at no instruction are
+      dropped (advisory). NB: the wat crate attaches folded-form hints to the first
+      instruction of the unfolded condition and drops binaryen-proprietary annotations
+      like `(@binaryen.js.called)` at parse time — `annotations-func-only.wat` tests
+      only the latter and is not portable (permanently-ignored test documents this).
+- [ ] Source maps: `-ism` per input, `-osm`, `-osu` (`sourcemap.wat`). The
+      offset-tracking infrastructure now exists; remaining work: source-map JSON +
+      VLQ codec, per-input CLI flags (NAME=PATH-style), output map/URL flags, and
+      absolute output offsets (post-pass over the emitted binary to locate function
+      bodies).
 
 ### Phase 5 — Full parity & hardening
 - [ ] `--output-manifest` (wasm-split manifest; implies `-g`) (`manifest.wat`).
@@ -191,7 +200,8 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 | table64.wat | 64-bit tables | ✅ ported |
 | names.wat with -g | name-section merging | ✅ ported (`names_kept`, plus alias/synthetic-start/prune behaviour tests) |
 | sourcemap.wat | source map preservation | ⏳ phase 4 (ignored test in place) |
-| annotations.wat / annotations-func-only.wat | branch hints / annotations | ⏳ phase 4 (ignored test in place) |
+| annotations.wat | branch hints | ✅ ported (binaryen-proprietary `@binaryen.js.called` cannot round-trip through the wat crate) |
+| annotations-func-only.wat | binaryen-proprietary annotations only | ✖ not portable (documented ignored test) |
 | manifest.wat | `--output-manifest` | ⏳ phase 5 (ignored test in place) |
 
 ## Log
