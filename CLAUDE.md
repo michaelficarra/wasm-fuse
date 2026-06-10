@@ -49,6 +49,11 @@ CI (`.github/workflows/ci.yml`) additionally checks the feature powerset
 (cargo-hack), MSRV (`rust-version` in Cargo.toml), a locked lockfile, and
 minimal dependency versions — keep `Cargo.lock` committed and in sync.
 
+CI deliberately does NOT gate on semver compatibility (owner's decision — do not
+re-add a cargo-semver-checks job): breaking API changes are acceptable, and
+release-plz runs cargo-semver-checks itself when preparing the release PR,
+bumping the major version as needed.
+
 Also available: `cargo +nightly fuzz run fuzz_merge` (wasm-smith modules through
 the merger; CI smoke-runs it on PRs) and `cargo bench --bench merge`.
 

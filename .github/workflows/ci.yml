@@ -143,19 +143,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
       - run: cargo +nightly generate-lockfile -Z minimal-versions
       - run: cargo +stable check --workspace --all-features --locked --keep-going
-  # https://github.com/obi1kenobi/cargo-semver-checks
-  # Advisory only: breaking changes are acceptable; release-plz runs its own
-  # semver check and bumps the major version in the release PR, so this job is
-  # red by design between merging a breaking change and merging that PR. It is
-  # deliberately excluded from ci-pass and allowed to fail.
-  semver:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2
+  # Semver compatibility is NOT checked here: breaking changes are acceptable,
+  # and release-plz runs cargo-semver-checks itself when preparing the release
+  # PR, bumping the major version as needed.
   ci-pass:
     needs: [fmt, clippy, warnings, docsrs, build, features, msrv, lockfile, minimal-versions]
     if: ${{ !cancelled() }}
