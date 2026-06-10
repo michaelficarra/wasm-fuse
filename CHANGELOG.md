@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0](https://github.com/michaelficarra/wasm-fuse/compare/v2.0.0...v3.0.0) - 2026-06-10
+
+### Other
+
+- replace ExportSelection with MergeOptions.entry_modules
+
 ## [2.0.0](https://github.com/michaelficarra/wasm-fuse/compare/v1.0.0...v2.0.0) - 2026-06-10
 
 ### Other
