@@ -79,8 +79,13 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"], optional =
 lazy_static = { version = "1.5.0", optional = true }
 
 [dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
 serde_json = "1.0.150"
 snapbox = { version = "1.2.2", features = ["cmd"] }
 tempfile = "3.27.0"
 wasmparser = "0.251"
 wat = "1.251"
+
+[[bench]]
+name = "merge"
+harness = false

@@ -49,6 +49,9 @@ CI (`.github/workflows/ci.yml`) additionally checks the feature powerset
 (cargo-hack), MSRV (`rust-version` in Cargo.toml), a locked lockfile, and
 minimal dependency versions — keep `Cargo.lock` committed and in sync.
 
+Also available: `cargo +nightly fuzz run fuzz_merge` (wasm-smith modules through
+the merger; CI smoke-runs it on PRs) and `cargo bench --bench merge`.
+
 ## Dependency management
 
 Dependencies come from cargo battery packs (`cargo bp`): `cli`, `error`, `logging`,

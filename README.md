@@ -55,6 +55,10 @@ wasm-fuse app.wasm lib.wasm --entry app --prune -o merged.wasm
 # indices — wasm-merge's -g
 wasm-fuse app.wasm lib.wasm -g -o merged.wasm
 
+# Write a wasm-split manifest (function names per non-primary module),
+# for splitting the merged module again later; implies --keep-names
+wasm-fuse app.wasm lib.wasm --output-manifest merged.manifest -o merged.wasm
+
 # Merge source maps alongside the modules; optionally embed the map URL
 wasm-fuse app.wasm lib.wasm \
     --source-map app=app.wasm.map --source-map lib=lib.wasm.map \

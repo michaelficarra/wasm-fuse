@@ -178,11 +178,24 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       instead by round-trip tests in `tests/source_map.rs` (documented ignored test).
 
 ### Phase 5 — Full parity & hardening
-- [ ] `--output-manifest` (wasm-split manifest; implies `-g`) (`manifest.wat`).
-- [ ] Fuzzing: wasm-smith-generated module sets merged and validated.
-- [ ] criterion benchmarks (many/large modules); performance pass.
-- [ ] cargo-deny/audit in CI; release/publish preparation (trusted publishing template).
-- [ ] Custom-section handling decisions documented (binaryen leaves this TODO).
+- [x] `--output-manifest` / `MergeOptions::emit_manifest` + `Merged::manifest`
+      (`manifest.wat` ported; content matches binaryen byte for byte; implies names,
+      like wasm-merge's flag implies `-g`; unnamed functions listed by merged index).
+      **This closed the last wasm-merge capability gap.**
+- [x] Fuzzing (`fuzz/`, via the ci battery pack fuzzing template): wasm-smith modules
+      merged under randomised options; PR smoke runs + nightly runs in CI; 214k local
+      runs clean. Future refinement: steer wasm-smith to generate cross-module imports
+      that actually fuse more often.
+- [x] criterion benchmarks (`benches/merge.rs`): import-chain fusing at 2/8/32 modules
+      and wide-module re-encode throughput at 100/1000 functions. The Bencher CI
+      workflow stays dormant until a BENCHER_PROJECT repo variable is configured.
+- [x] cargo-deny/audit in CI (deny.toml + scheduled audit workflow, from phase 0).
+- [ ] Publish preparation: restore the cargo-semver-checks CI job once a baseline is on
+      crates.io (TODO note in ci.yml); release-plz scaffolding already present.
+- [x] Custom-section handling documented: name sections merged (`--keep-names`),
+      branch hints always preserved, `sourceMappingURL` regenerated via
+      `--source-map-url`; all other custom sections are dropped, as binaryen does
+      (its own TODO).
 
 ## Parity checklist (binaryen `test/lit/merge` → status)
 
@@ -207,7 +220,7 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 | sourcemap.wat | source map preservation | ✅ capability covered by tests/source_map.rs round-trips (fixture itself not portable: `;;@` comments are invisible to the wat crate) |
 | annotations.wat | branch hints | ✅ ported (binaryen-proprietary `@binaryen.js.called` cannot round-trip through the wat crate) |
 | annotations-func-only.wat | binaryen-proprietary annotations only | ✖ not portable (documented ignored test) |
-| manifest.wat | `--output-manifest` | ⏳ phase 5 (ignored test in place) |
+| manifest.wat | `--output-manifest` | ✅ ported (manifest content matches binaryen byte for byte) |
 
 ## Log
 
