@@ -24,6 +24,10 @@ required-features = ["cli"]
 name = "binaryen_suite"
 required-features = ["cli"]
 
+[[test]]
+name = "source_map"
+required-features = ["cli"]
+
 [features]
 default = ["cli"]
 # Everything the binary needs beyond the library; library consumers can use
@@ -50,6 +54,10 @@ wat = "1.251"
 # error battery pack (library side)
 thiserror = "2.0.18"
 
+# source-map JSON (library side)
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+
 # cli battery pack (all optional, enabled by the `cli` feature)
 anstream = { version = "1.0.0", optional = true }
 anstyle = { version = "1.0.14", optional = true }
@@ -69,6 +77,8 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"], optional =
 lazy_static = { version = "1.5.0", optional = true }
 
 [dev-dependencies]
+serde_json = "1.0.150"
 snapbox = { version = "1.2.2", features = ["cmd"] }
 tempfile = "3.27.0"
+wasmparser = "0.251"
 wat = "1.251"

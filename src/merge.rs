@@ -3,7 +3,7 @@
 
 use wasmparser::WasmFeatures;
 
-use crate::{check, emit, names, parse, prune, resolve, types};
+use crate::{check, emit, names, parse, prune, resolve, sourcemap, types};
 
 /// What to do when two input modules export the same name (in
 /// [`ExportSelection::Union`] mode).
@@ -64,6 +64,10 @@ pub struct MergeOptions {
     /// definition's name disagree, the definition wins. Off by default, like
     /// wasm-merge without `-g`.
     pub keep_names: bool,
+    /// Embed this URL in a `sourceMappingURL` custom section of the output,
+    /// pointing consumers at the merged source map (wasm-merge's
+    /// `--output-source-map-url`).
+    pub source_map_url: Option<String>,
 }
 
 impl Default for MergeOptions {
@@ -74,6 +78,7 @@ impl Default for MergeOptions {
             validate: true,
             prune_unused: false,
             keep_names: false,
+            source_map_url: None,
         }
     }
 }
@@ -163,6 +168,30 @@ pub enum MergeError {
     /// The merged module failed validation.
     #[error("merged module failed validation: {0}")]
     Validation(#[from] wasmparser::BinaryReaderError),
+    /// A source map could not be parsed or applied.
+    #[error("invalid source map for module {module:?}: {message}")]
+    SourceMap {
+        /// The module the source map was attached to.
+        module: String,
+        /// A description of the problem.
+        message: String,
+    },
+    /// [`Merger::add_source_map`] named a module that has not been added.
+    #[error("no module named {name:?} has been added")]
+    UnknownModule {
+        /// The module name that was not found.
+        name: String,
+    },
+}
+
+/// The products of a merge.
+#[derive(Debug)]
+pub struct Merged {
+    /// The merged module, as a binary.
+    pub module: Vec<u8>,
+    /// The merged source map (JSON), present when any input had one attached
+    /// via [`Merger::add_source_map`].
+    pub source_map: Option<String>,
 }
 
 /// Merges named WebAssembly modules into a single module.
@@ -176,6 +205,7 @@ pub struct Merger {
 struct InputModule {
     name: String,
     binary: Vec<u8>,
+    source_map: Option<sourcemap::InputSourceMap>,
 }
 
 impl Merger {
@@ -207,12 +237,40 @@ impl Merger {
                 source,
             })?
             .into_owned();
-        self.inputs.push(InputModule { name, binary });
+        self.inputs.push(InputModule {
+            name,
+            binary,
+            source_map: None,
+        });
+        Ok(())
+    }
+
+    /// Attach a source map (Source Map V3 JSON, as produced alongside the
+    /// module by its toolchain) to the already-added module named `module`.
+    /// The merged source map is returned by [`Merger::merge_full`].
+    pub fn add_source_map(&mut self, module: &str, json: &[u8]) -> Result<(), MergeError> {
+        let map = sourcemap::parse(module, json)?;
+        let input = self
+            .inputs
+            .iter_mut()
+            .find(|input| input.name == module)
+            .ok_or_else(|| MergeError::UnknownModule {
+                name: module.to_string(),
+            })?;
+        input.source_map = Some(map);
         Ok(())
     }
 
     /// Merge all added modules into a single binary module.
+    ///
+    /// A convenience for [`Merger::merge_full`] when only the module itself
+    /// is needed.
     pub fn merge(self) -> Result<Vec<u8>, MergeError> {
+        Ok(self.merge_full()?.module)
+    }
+
+    /// Merge all added modules, returning every product of the merge.
+    pub fn merge_full(self) -> Result<Merged, MergeError> {
         let parsed = self
             .inputs
             .iter()
@@ -245,19 +303,35 @@ impl Merger {
             None
         };
 
-        let output = emit::emit(
-            &parsed,
-            &layout,
-            &exports,
-            liveness.as_ref(),
-            &canon,
-            name_section.as_ref(),
-        )?;
+        let track_offsets = self.inputs.iter().any(|input| input.source_map.is_some());
+        let config = emit::EmitConfig {
+            exports: &exports,
+            live: liveness.as_ref(),
+            canon: &canon,
+            name_section: name_section.as_ref(),
+            track_offsets,
+            source_map_url: self.options.source_map_url.as_deref(),
+        };
+        let (output, code_offsets) = emit::emit(&parsed, &layout, &config)?;
+
+        let source_map = if track_offsets {
+            let maps: Vec<_> = self
+                .inputs
+                .iter()
+                .map(|input| input.source_map.as_ref())
+                .collect();
+            Some(sourcemap::build(&maps, &code_offsets, &output)?)
+        } else {
+            None
+        };
 
         if self.options.validate {
             wasmparser::Validator::new_with_features(self.options.features)
                 .validate_all(&output)?;
         }
-        Ok(output)
+        Ok(Merged {
+            module: output,
+            source_map,
+        })
     }
 }

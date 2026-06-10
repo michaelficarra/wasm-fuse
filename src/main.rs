@@ -64,6 +64,18 @@ struct Cli {
     #[arg(short = 'g', long)]
     keep_names: bool,
 
+    /// Input source map for a module, as NAME=PATH (repeatable)
+    #[arg(long, value_name = "NAME=PATH")]
+    source_map: Vec<String>,
+
+    /// Write the merged source map (JSON) to this path
+    #[arg(long, value_name = "PATH")]
+    output_source_map: Option<PathBuf>,
+
+    /// Embed this URL in a sourceMappingURL section of the output
+    #[arg(long, value_name = "URL")]
+    source_map_url: Option<String>,
+
     /// Skip output validation and import/export compatibility checking
     #[arg(long)]
     no_validate: bool,
@@ -145,6 +157,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         validate: !cli.no_validate,
         prune_unused: cli.prune,
         keep_names: cli.keep_names,
+        source_map_url: cli.source_map_url.clone(),
     };
 
     let mut merger = Merger::new(options);
@@ -155,12 +168,21 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         merger.add_module(name, &bytes)?;
     }
 
-    let merged = merger.merge()?;
+    for entry in &cli.source_map {
+        let Some((name, path)) = entry.split_once('=') else {
+            anyhow::bail!("--source-map expects NAME=PATH, got {entry:?}");
+        };
+        let bytes = std::fs::read(path)
+            .map_err(|error| anyhow::anyhow!("failed to read {path}: {error}"))?;
+        merger.add_source_map(name, &bytes)?;
+    }
+
+    let merged = merger.merge_full()?;
 
     let output: Vec<u8> = if cli.text {
-        wasmprinter::print_bytes(&merged)?.into_bytes()
+        wasmprinter::print_bytes(&merged.module)?.into_bytes()
     } else {
-        merged
+        merged.module
     };
 
     if cli.output.as_os_str() == "-" {
@@ -169,6 +191,15 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         std::fs::write(&cli.output, &output).map_err(|error| {
             anyhow::anyhow!("failed to write {}: {error}", cli.output.display())
         })?;
+    }
+
+    if let Some(path) = &cli.output_source_map {
+        // Without any input maps the merged map is valid but empty.
+        let map = merged.source_map.unwrap_or_else(|| {
+            r#"{"version":3,"sources":[],"names":[],"mappings":""}"#.to_string()
+        });
+        std::fs::write(path, map)
+            .map_err(|error| anyhow::anyhow!("failed to write {}: {error}", path.display()))?;
     }
     Ok(())
 }

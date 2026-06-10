@@ -357,15 +357,15 @@ fn types_mismatches_are_all_reported() {
     }
 }
 
-// Not yet implemented — these fixtures are vendored but their features are
-// pending (see PLAN.md): sourcemap.wat (phase 4: source maps), names.wat with
-// -g (phase 4: names section), annotations.wat and annotations-func-only.wat
-// (phase 4: code annotations), manifest.wat (phase 5: --output-manifest).
+// Fixtures vendored but not runnable as-is — each ignored test explains why,
+// and PLAN.md tracks the remaining work (manifest.wat → phase 5).
 
 #[test]
-#[ignore = "source maps are not yet supported (PLAN.md phase 4)"]
+#[ignore = "binaryen's test drives maps via wasm-as from ;;@ comments, which the wat \
+            crate treats as plain comments; source maps are covered by \
+            tests/source_map.rs instead"]
 fn sourcemap() {
-    unimplemented!("port sourcemap.wat once -ism/-osm/-osu are implemented");
+    unimplemented!("not portable through the wat crate; see tests/source_map.rs");
 }
 
 #[test]

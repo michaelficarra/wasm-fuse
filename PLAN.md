@@ -149,7 +149,7 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       merge-time "type mismatch when importing …" diagnostics.
 - [x] memory64/table64 (`table64.wat`) — covered since phase 1.
 
-### Phase 4 — Debug info, names, source maps
+### Phase 4 — Debug info, names, source maps  ✅
 - [x] `-g`/`--keep-names` (`src/names.rs`): merges the inputs' name sections — module,
       function, local, label, type (canonical indices), table, memory, global, element,
       data, field, tag names — with indices remapped, pruned items' names dropped, and
@@ -166,11 +166,16 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       instruction of the unfolded condition and drops binaryen-proprietary annotations
       like `(@binaryen.js.called)` at parse time — `annotations-func-only.wat` tests
       only the latter and is not portable (permanently-ignored test documents this).
-- [ ] Source maps: `-ism` per input, `-osm`, `-osu` (`sourcemap.wat`). The
-      offset-tracking infrastructure now exists; remaining work: source-map JSON +
-      VLQ codec, per-input CLI flags (NAME=PATH-style), output map/URL flags, and
-      absolute output offsets (post-pass over the emitted binary to locate function
-      bodies).
+- [x] Source maps (`src/sourcemap.rs`): per-input maps attach by module name
+      (`--source-map NAME=PATH` / `Merger::add_source_map`), segments translate
+      through the per-instruction offset log plus a post-pass locating each function
+      body in the merged binary, and `Merger::merge_full` returns the merged map
+      (`--output-source-map`); `--source-map-url` / `MergeOptions::source_map_url`
+      embeds a `sourceMappingURL` section. Sources/names deduplicate by string;
+      sourceRoot is folded into sources; segments of pruned code are dropped.
+      Uses serde/serde_json plus a hand-rolled VLQ codec. binaryen's sourcemap.wat
+      drives maps via wasm-as from `;;@` comments the wat crate cannot see — covered
+      instead by round-trip tests in `tests/source_map.rs` (documented ignored test).
 
 ### Phase 5 — Full parity & hardening
 - [ ] `--output-manifest` (wasm-split manifest; implies `-g`) (`manifest.wat`).
@@ -199,7 +204,7 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 | global_subtyping.wat | global subtyping (GC) | ✅ ported (ditto) |
 | table64.wat | 64-bit tables | ✅ ported |
 | names.wat with -g | name-section merging | ✅ ported (`names_kept`, plus alias/synthetic-start/prune behaviour tests) |
-| sourcemap.wat | source map preservation | ⏳ phase 4 (ignored test in place) |
+| sourcemap.wat | source map preservation | ✅ capability covered by tests/source_map.rs round-trips (fixture itself not portable: `;;@` comments are invisible to the wat crate) |
 | annotations.wat | branch hints | ✅ ported (binaryen-proprietary `@binaryen.js.called` cannot round-trip through the wat crate) |
 | annotations-func-only.wat | binaryen-proprietary annotations only | ✖ not portable (documented ignored test) |
 | manifest.wat | `--output-manifest` | ⏳ phase 5 (ignored test in place) |

@@ -96,14 +96,32 @@ pub(crate) fn surviving_exports(
     Ok(survivors)
 }
 
+/// Everything `emit` needs besides the parsed modules and the layout.
+pub(crate) struct EmitConfig<'a> {
+    pub(crate) exports: &'a [SurvivingExport],
+    pub(crate) live: Option<&'a Liveness>,
+    pub(crate) canon: &'a TypeCanon,
+    pub(crate) name_section: Option<&'a wasm_encoder::NameSection>,
+    /// Record per-instruction offsets for every emitted function (for source
+    /// maps); branch hints record their own functions regardless.
+    pub(crate) track_offsets: bool,
+    /// Embed this URL in a `sourceMappingURL` custom section.
+    pub(crate) source_map_url: Option<&'a str>,
+}
+
 pub(crate) fn emit(
     parsed: &[ParsedModule<'_>],
     layout: &Layout,
-    exports: &[SurvivingExport],
-    live: Option<&Liveness>,
-    canon: &TypeCanon,
-    name_section: Option<&wasm_encoder::NameSection>,
-) -> Result<Vec<u8>, MergeError> {
+    config: &EmitConfig<'_>,
+) -> Result<(Vec<u8>, crate::sourcemap::CodeOffsets), MergeError> {
+    let EmitConfig {
+        exports,
+        live,
+        canon,
+        name_section,
+        track_offsets,
+        source_map_url,
+    } = *config;
     let def_live = |kind: Kind, module: usize, def_index: u32| {
         live.is_none_or(|live| live.def(kind, module, def_index))
     };
@@ -309,8 +327,11 @@ pub(crate) fn emit(
     // Code, while translating branch hints: a hint's offset (relative to its
     // function's body) is mapped through the per-instruction offsets recorded
     // during re-encoding — remapped indices can change instruction widths.
+    // With offset tracking on, the same records are collected for every
+    // function, for source-map translation.
     let mut code = CodeSection::new();
     let mut merged_hints: BTreeMap<u32, Vec<wasm_encoder::BranchHint>> = BTreeMap::new();
+    let mut code_offsets: crate::sourcemap::CodeOffsets = Vec::new();
     for (module_idx, input) in parsed.iter().enumerate() {
         let import_count = input.import_count(Kind::Func);
         for (def_index, body) in input.code.iter().enumerate() {
@@ -328,7 +349,7 @@ pub(crate) fn emit(
             let mut remapper = Remapper {
                 module_name: &input.name,
                 tables: &layout.remaps[module_idx],
-                instruction_offsets: hints.is_some().then_some(&mut offsets),
+                instruction_offsets: (track_offsets || hints.is_some()).then_some(&mut offsets),
             };
             remapper
                 .parse_function_body(&mut code, body.clone())
@@ -356,6 +377,9 @@ pub(crate) fn emit(
                         .or_default()
                         .extend(translated);
                 }
+            }
+            if track_offsets {
+                code_offsets.push((module_idx, offsets));
             }
         }
     }
@@ -399,5 +423,14 @@ pub(crate) fn emit(
         module.section(names);
     }
 
-    Ok(module.finish())
+    if let Some(url) = source_map_url {
+        let mut data = Vec::new();
+        wasm_encoder::Encode::encode(url, &mut data);
+        module.section(&wasm_encoder::CustomSection {
+            name: "sourceMappingURL".into(),
+            data: data.into(),
+        });
+    }
+
+    Ok((module.finish(), code_offsets))
 }
