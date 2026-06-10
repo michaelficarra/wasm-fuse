@@ -51,6 +51,15 @@ struct Cli {
     )]
     export_conflicts: ConflictPolicy,
 
+    /// Remove anything unreachable from the kept exports and start functions
+    ///
+    /// Tree-shakes the merged module: functions, globals, tables, memories,
+    /// tags, and segments that the kept exports and start functions never
+    /// reach are dropped. Combine with --entry to bundle an application
+    /// with only the library code it actually uses.
+    #[arg(long)]
+    prune: bool,
+
     /// Skip output validation and import/export compatibility checking
     #[arg(long)]
     no_validate: bool,
@@ -130,6 +139,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         // accepted and the output validated with every proposal enabled.
         features: WasmFeatures::all(),
         validate: !cli.no_validate,
+        prune_unused: cli.prune,
     };
 
     let mut merger = Merger::new(options);

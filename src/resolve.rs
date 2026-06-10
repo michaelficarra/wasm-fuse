@@ -14,7 +14,8 @@ use wasmparser::Operator;
 
 use crate::merge::MergeError;
 use crate::parse::{Kind, KindMap, ParsedModule};
-use crate::remap::RemapTables;
+use crate::prune::Liveness;
+use crate::remap::{PRUNED, RemapTables};
 
 /// Where a reference ultimately lands after chasing fused imports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -105,23 +106,31 @@ pub(crate) struct Layout {
     /// Imports that survive into the output, as (module, slot) pairs per kind,
     /// in merged index order.
     pub(crate) canonical_imports: KindMap<Vec<(usize, u32)>>,
-    /// Defined globals in their final (dependency-ordered) emission order, as
-    /// (module, def_index) pairs.
+    /// Defined globals in their final (dependency-ordered, live-only) emission
+    /// order, as (module, def_index) pairs.
     pub(crate) global_order: Vec<(usize, u32)>,
     /// Per input module, the old-index → merged-index tables for every index
-    /// space.
+    /// space. Pruned items map to [`PRUNED`](crate::remap::PRUNED); live items
+    /// never reference them.
     pub(crate) remaps: Vec<RemapTables>,
+    /// The total number of functions in the output (imports plus surviving
+    /// definitions) — the index a synthetic combined start function gets.
+    pub(crate) func_count: u32,
 }
 
 /// Compute the merged layout: assign merged indices to every surviving import
-/// and every definition, and build the per-module remap tables.
+/// and every definition, and build the per-module remap tables. With `live`
+/// set, items outside the live set get no index (pruning).
 pub(crate) fn layout(
     parsed: &[ParsedModule<'_>],
     resolution: &mut Resolution<'_>,
+    live: Option<&Liveness>,
 ) -> Result<Layout, MergeError> {
+    let item_live = |kind: Kind, site: Site| live.is_none_or(|live| live.item(kind, site));
+
     // Surviving imports come first in each index space, in module order. An
     // import survives only if it resolves to itself (anything else remaps to
-    // the site it resolved to).
+    // the site it resolved to) and is reachable.
     let mut canonical_imports: KindMap<Vec<(usize, u32)>> = KindMap::default();
     let mut import_index: HashMap<(Kind, usize, u32), u32> = HashMap::new();
     for kind in Kind::ALL {
@@ -133,6 +142,7 @@ pub(crate) fn layout(
                         module: module_idx,
                         slot,
                     })
+                    && item_live(kind, site)
                 {
                     import_index.insert(
                         (kind, module_idx, slot),
@@ -144,27 +154,51 @@ pub(crate) fn layout(
         }
     }
 
-    // Definitions follow, grouped by module in input order...
+    // Surviving definitions follow, grouped by module in input order. Each
+    // definition's rank counts only the live definitions before it in its
+    // module.
     let mut def_base: Vec<KindMap<u32>> = Vec::with_capacity(parsed.len());
+    let mut def_rank: Vec<KindMap<Vec<u32>>> = Vec::with_capacity(parsed.len());
     let mut next_def: KindMap<u32> = KindMap::default();
     for kind in Kind::ALL {
         next_def[kind] = canonical_imports[kind].len() as u32;
     }
-    for module in parsed {
+    for (module_idx, module) in parsed.iter().enumerate() {
         let mut base = KindMap::default();
+        let mut ranks = KindMap::default();
         for kind in Kind::ALL {
             base[kind] = next_def[kind];
-            next_def[kind] += module.defined_count(kind);
+            let mut rank = Vec::with_capacity(module.defined_count(kind) as usize);
+            for def_index in 0..module.defined_count(kind) {
+                if item_live(
+                    kind,
+                    Site::Def {
+                        module: module_idx,
+                        def_index,
+                    },
+                ) {
+                    rank.push(next_def[kind] - base[kind]);
+                    next_def[kind] += 1;
+                } else {
+                    rank.push(PRUNED);
+                }
+            }
+            ranks[kind] = rank;
         }
         def_base.push(base);
+        def_rank.push(ranks);
     }
+    let func_count = next_def[Kind::Func];
 
-    // ...except globals, whose initialisers may only read globals defined
-    // earlier in the section. Fusing can introduce forward references (an
-    // earlier module's import resolved to a later module's global), so order
-    // defined globals by their initialiser dependencies, breaking ties in
-    // favour of the original order.
-    let global_order = order_globals(parsed, resolution)?;
+    // Globals get their indices not from module order but from dependency
+    // order: initialisers may only read globals defined earlier in the
+    // section, and fusing can introduce forward references (an earlier
+    // module's import resolved to a later module's global). Order all defined
+    // globals topologically, then keep the live ones.
+    let global_order: Vec<(usize, u32)> = order_globals(parsed, resolution)?
+        .into_iter()
+        .filter(|&(module, def_index)| item_live(Kind::Global, Site::Def { module, def_index }))
+        .collect();
     let global_import_count = canonical_imports[Kind::Global].len() as u32;
     let mut global_def_position: HashMap<(usize, u32), u32> = HashMap::new();
     for (position, &(module_idx, def_index)) in global_order.iter().enumerate() {
@@ -172,32 +206,56 @@ pub(crate) fn layout(
     }
 
     // Type, element-segment, and data-segment spaces cannot be imported, so
-    // they remap by plain concatenation offsets.
+    // they remap by concatenation, skipping pruned segments. Types are never
+    // pruned (see prune.rs).
     let mut remaps = Vec::with_capacity(parsed.len());
     let mut type_offset = 0u32;
-    let mut element_offset = 0u32;
-    let mut data_offset = 0u32;
+    let mut element_next = 0u32;
+    let mut data_next = 0u32;
     for (module_idx, module) in parsed.iter().enumerate() {
+        let elem_live = |index: u32| live.is_none_or(|live| live.elem(module_idx, index));
+        let data_live = |index: u32| live.is_none_or(|live| live.data(module_idx, index));
         let mut tables = RemapTables {
             types: (type_offset..type_offset + module.type_count()).collect(),
-            elements: (element_offset..element_offset + module.elements.len() as u32).collect(),
-            datas: (data_offset..data_offset + module.datas.len() as u32).collect(),
             ..RemapTables::default()
         };
         type_offset += module.type_count();
-        element_offset += module.elements.len() as u32;
-        data_offset += module.datas.len() as u32;
+        for index in 0..module.elements.len() as u32 {
+            tables.elements.push(if elem_live(index) {
+                element_next += 1;
+                element_next - 1
+            } else {
+                PRUNED
+            });
+        }
+        for index in 0..module.datas.len() as u32 {
+            tables.datas.push(if data_live(index) {
+                data_next += 1;
+                data_next - 1
+            } else {
+                PRUNED
+            });
+        }
 
         for kind in Kind::ALL {
             let map = tables.kind_mut(kind);
             for index in 0..module.item_count(kind) {
                 let merged = match resolution.resolve(kind, module_idx, index)? {
-                    Site::Import { module, slot } => import_index[&(kind, module, slot)],
+                    Site::Import { module, slot } => import_index
+                        .get(&(kind, module, slot))
+                        .copied()
+                        .unwrap_or(PRUNED),
                     Site::Def { module, def_index } => {
                         if kind == Kind::Global {
-                            global_import_count + global_def_position[&(module, def_index)]
+                            global_def_position
+                                .get(&(module, def_index))
+                                .map(|&position| global_import_count + position)
+                                .unwrap_or(PRUNED)
                         } else {
-                            def_base[module][kind] + def_index
+                            match def_rank[module][kind][def_index as usize] {
+                                PRUNED => PRUNED,
+                                rank => def_base[module][kind] + rank,
+                            }
                         }
                     }
                 };
@@ -212,6 +270,7 @@ pub(crate) fn layout(
         canonical_imports,
         global_order,
         remaps,
+        func_count,
     })
 }
 

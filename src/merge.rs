@@ -3,7 +3,7 @@
 
 use wasmparser::WasmFeatures;
 
-use crate::{check, emit, parse, resolve};
+use crate::{check, emit, parse, prune, resolve};
 
 /// What to do when two input modules export the same name (in
 /// [`ExportSelection::Union`] mode).
@@ -50,6 +50,14 @@ pub struct MergeOptions {
     /// merged output. (Like wasm-merge, inputs are never validated
     /// individually — an input may only become valid once merged.)
     pub validate: bool,
+    /// Remove items that are not reachable from the kept exports or the start
+    /// functions: functions, globals, tables, memories, tags, and segments
+    /// nothing live references are dropped. wasm-merge does this
+    /// unconditionally (its remove-unused-module-elements pass); here it is
+    /// off by default — merging alone never deletes code. Combined with
+    /// [`ExportSelection::Entry`] this tree-shakes a bundle down to what the
+    /// entry-point module actually uses.
+    pub prune_unused: bool,
 }
 
 impl Default for MergeOptions {
@@ -58,6 +66,7 @@ impl Default for MergeOptions {
             exports: ExportSelection::default(),
             features: WasmFeatures::default(),
             validate: true,
+            prune_unused: false,
         }
     }
 }
@@ -203,19 +212,21 @@ impl Merger {
             .map(|input| parse::parse_module(&input.name, &input.binary))
             .collect::<Result<Vec<_>, _>>()?;
 
-        if let ExportSelection::Entry(name) = &self.options.exports {
-            if !parsed.iter().any(|module| module.name == *name) {
-                return Err(MergeError::UnknownEntryModule { name: name.clone() });
-            }
-        }
+        // Also validates that an Entry export selection names an input module.
+        let exports = emit::surviving_exports(&parsed, &self.options)?;
 
         let mut resolution = resolve::Resolution::new(&parsed);
-        let layout = resolve::layout(&parsed, &mut resolution)?;
+        let liveness = if self.options.prune_unused {
+            Some(prune::compute_liveness(&parsed, &mut resolution, &exports)?)
+        } else {
+            None
+        };
+        let layout = resolve::layout(&parsed, &mut resolution, liveness.as_ref())?;
         if self.options.validate {
             check::check_fused(&parsed, &mut resolution)?;
         }
 
-        let output = emit::emit(&parsed, &layout, &self.options)?;
+        let output = emit::emit(&parsed, &layout, &exports, liveness.as_ref())?;
 
         if self.options.validate {
             wasmparser::Validator::new_with_features(self.options.features)

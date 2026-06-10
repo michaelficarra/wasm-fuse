@@ -37,6 +37,7 @@ mod check;
 mod emit;
 mod merge;
 mod parse;
+mod prune;
 mod remap;
 mod resolve;
 

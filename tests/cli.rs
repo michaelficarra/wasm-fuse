@@ -342,3 +342,165 @@ fn entry_mode_rejects_export_conflict_policy() {
         "unexpected stderr: {stderr}"
     );
 }
+
+#[test]
+fn prune_drops_unreachable_library_code() {
+    // app uses lib.answer but not lib.extra; with --entry app --prune the
+    // unused library function disappears. Top-level functions print as
+    // "\n  (func"; imported ones appear inside "(import" lines.
+    let dir = tempfile::tempdir().unwrap();
+    let (app, lib) = write_entry_fixtures(dir.path());
+    let merged = |extra_flags: &[&str]| {
+        let output = wasm_fuse()
+            .args([&app, &lib])
+            .args(["--entry", "app", "--text", "-o", "-"])
+            .args(extra_flags)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let unpruned = merged(&[]);
+    let pruned = merged(&["--prune"]);
+    // unpruned: main + answer + extra; pruned: main + answer
+    assert_eq!(unpruned.matches("\n  (func").count(), 3, "{unpruned}");
+    assert_eq!(pruned.matches("\n  (func").count(), 2, "{pruned}");
+    // the import that app actually calls is still there
+    assert!(pruned.contains(r#"(import "env" "print""#), "{pruned}");
+}
+
+#[test]
+fn prune_removes_unused_imports() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("app.wat");
+    std::fs::write(
+        &app,
+        r#"(module
+            (import "env" "never_called" (func (param i32)))
+            (func (export "main") (result i32) (i32.const 0)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(format!("app={}", app.display()))
+        .args(["--prune", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(!text.contains("(import"), "import should be pruned: {text}");
+}
+
+#[test]
+fn prune_keeps_start_functions_and_their_callees() {
+    let dir = tempfile::tempdir().unwrap();
+    let module = dir.path().join("init.wat");
+    std::fs::write(
+        &module,
+        r#"(module
+            (func $helper (drop (i32.const 1)))
+            (func $init (call $helper))
+            (func $dead (drop (i32.const 2)))
+            (start $init))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(format!("init={}", module.display()))
+        .args(["--prune", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("(start"), "start must survive: {text}");
+    assert_eq!(
+        text.matches("\n  (func").count(),
+        2,
+        "only the start function and its callee should survive: {text}"
+    );
+}
+
+#[test]
+fn prune_drops_unused_table_with_its_segments() {
+    // The library's function table is referenced by nothing the entry module
+    // uses, so the table, its active element segment, and the function the
+    // segment mentions all go.
+    let dir = tempfile::tempdir().unwrap();
+    let (app, _) = write_entry_fixtures(dir.path());
+    let lib = dir.path().join("lib.wat");
+    std::fs::write(
+        &lib,
+        r#"(module
+            (func (export "answer") (result i32) (i32.const 42))
+            (func $only_in_table (result i32) (i32.const 7))
+            (table $dispatch 1 funcref)
+            (elem (table $dispatch) (i32.const 0) func $only_in_table))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(&app)
+        .arg(format!("lib={}", lib.display()))
+        .args(["--entry", "app", "--prune", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(!text.contains("(table"), "table should be pruned: {text}");
+    assert!(!text.contains("(elem"), "segment should be pruned: {text}");
+    assert_eq!(
+        text.matches("\n  (func").count(),
+        2,
+        "only main and answer should survive: {text}"
+    );
+}
+
+#[test]
+fn prune_keeps_tables_reached_through_call_indirect() {
+    // app calls indirectly through lib's table, so the table, its active
+    // segment, and the function the segment installs must all survive.
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.wat");
+    let app = dir.path().join("app.wat");
+    std::fs::write(
+        &lib,
+        r#"(module
+            (func $handler (result i32) (i32.const 7))
+            (table (export "dispatch") 1 funcref)
+            (elem (i32.const 0) func $handler))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &app,
+        r#"(module
+            (import "lib" "dispatch" (table 1 funcref))
+            (type $handler_type (func (result i32)))
+            (func (export "main") (result i32)
+                (call_indirect (type $handler_type) (i32.const 0))))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(&app)
+        .arg(&lib)
+        .args(["--entry", "app", "--prune", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("(table"), "table must survive: {text}");
+    assert!(text.contains("(elem"), "segment must survive: {text}");
+    assert_eq!(
+        text.matches("\n  (func").count(),
+        2,
+        "main and the table's handler should survive: {text}"
+    );
+}

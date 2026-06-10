@@ -10,6 +10,12 @@ use wasm_encoder::reencode::{Error as ReencodeError, Reencode};
 use crate::merge::MergeError;
 use crate::parse::Kind;
 
+/// Sentinel for an item removed by pruning: it has no merged index, and by
+/// construction no live item references it. A lookup hitting this value is an
+/// internal liveness-analysis bug, reported as an error rather than silently
+/// emitting a wrong index.
+pub(crate) const PRUNED: u32 = u32::MAX;
+
 /// Old-index → merged-index tables for every index space of one input module.
 #[derive(Debug, Default)]
 pub(crate) struct RemapTables {
@@ -57,13 +63,20 @@ impl Remapper<'_> {
         index: u32,
         kind: &'static str,
     ) -> Result<u32, ReencodeError<MergeError>> {
-        table.get(index as usize).copied().ok_or_else(|| {
-            ReencodeError::UserError(MergeError::OutOfBoundsIndex {
+        match table.get(index as usize).copied() {
+            Some(PRUNED) => Err(ReencodeError::UserError(MergeError::Reencode {
+                module: self.module_name.to_string(),
+                message: format!(
+                    "internal error: {kind} {index} was pruned but is still referenced"
+                ),
+            })),
+            Some(mapped) => Ok(mapped),
+            None => Err(ReencodeError::UserError(MergeError::OutOfBoundsIndex {
                 module: self.module_name.to_string(),
                 kind,
                 index,
-            })
-        })
+            })),
+        }
     }
 }
 

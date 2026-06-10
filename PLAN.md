@@ -115,12 +115,20 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       duplicate module names, unresolved imports preserved, `-n` skipping checks,
       missing-file diagnostics.
 
-### Phase 2 — Remaining semantics parity
+### Phase 2 — Remaining semantics parity  ✅
 - [x] Import/export compatibility checks with binaryen-style messages (`types.wat`) —
       landed early, in phase 1.
 - [x] Tags/exception-handling merging (covered by fusing/renamings fixtures).
-- [ ] Decide on and (if adopted) implement binaryen's remove-unused-module-elements
-      equivalent (reachability DCE from exports/start/segments), possibly opt-in.
+- [x] Pruning (`src/prune.rs`): the equivalent of binaryen's unconditional
+      remove-unused-module-elements pass, adopted as **opt-in** (`--prune` /
+      `MergeOptions::prune_unused`) — merging alone never deletes code. Reachability
+      over resolved sites from the surviving exports + all start functions; reference
+      collection reuses the Reencode hooks (a recording no-op remapper), so operator
+      coverage is maintained upstream. Conservative choices documented in prune.rs:
+      declarative segments and their functions are roots; active segments targeting
+      imported tables/memories are roots; types are never pruned; segment traps are
+      assumed absent (as binaryen does). Combined with `--entry` this tree-shakes a
+      bundle down to what the entry module uses.
 - ~~Feature-flag surface~~ — dropped deliberately: the CLI has no wasm-feature
       toggles (always all proposals); `WasmFeatures` stays a library option.
 
@@ -186,3 +194,8 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
   README CI badge if it gets renamed. Fixed the minimal-versions CI job by declaring
   the dependency minimums we actually test (and a documented lazy_static raise for
   sharded-slab's dishonest minimum), verified locally with the job's own commands.
+- 2026-06-09: Phase 2 complete — opt-in pruning landed (--prune /
+  MergeOptions::prune_unused) with five behaviour tests (unused library code, unused
+  imports, start-function liveness, dead table+segment removal, call_indirect keep-
+  alive cascade). Refinement ideas left for later: filter declarative segment items to
+  live functions; prune unused types alongside phase 3 canonicalisation. Next: phase 3.
