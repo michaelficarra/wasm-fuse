@@ -13,6 +13,17 @@ categories = ["wasm", "command-line-utilities", "development-tools"]
 name = "wasm-fuse"
 required-features = ["cli"]
 
+# The integration tests drive the binary above; without its required feature
+# the binary is never built, but Cargo would still set CARGO_BIN_EXE_wasm-fuse
+# to the (non-existent) path. Requiring the feature here skips them instead.
+[[test]]
+name = "cli"
+required-features = ["cli"]
+
+[[test]]
+name = "binaryen_suite"
+required-features = ["cli"]
+
 [features]
 default = ["cli"]
 # Everything the binary needs beyond the library; library consumers can use
