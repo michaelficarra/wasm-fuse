@@ -1,5 +1,5 @@
 [package]
-name = "wasm-bundle"
+name = "wasm-fuse"
 version = "0.1.0"
 edition = "2024"
 description = "Merge multiple WebAssembly modules into one — a Rust counterpart to binaryen's wasm-merge"
@@ -10,7 +10,7 @@ keywords = ["wasm", "webassembly", "merge", "bundler", "linker"]
 categories = ["wasm", "command-line-utilities", "development-tools"]
 
 [[bin]]
-name = "wasm-bundle"
+name = "wasm-fuse"
 required-features = ["cli"]
 
 [features]

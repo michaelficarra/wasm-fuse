@@ -1,4 +1,4 @@
-# wasm-bundle
+# wasm-fuse
 
 Merges multiple WebAssembly core modules into one, resolving imports in one module
 against exports of another at merge time. A Rust counterpart to binaryen's
@@ -18,7 +18,7 @@ the parity table and log).
   `default-features = false`. Keep CLI-only dependencies optional and listed in the
   `cli` feature.
 - `tests/cli.rs` — integration tests that run the real binary via
-  `std::process::Command` (`env!("CARGO_BIN_EXE_wasm-bundle")`).
+  `std::process::Command` (`env!("CARGO_BIN_EXE_wasm-fuse")`).
 - `tests/fixtures/binaryen/` — test inputs vendored from binaryen `test/lit/merge`
   (Apache-2.0; see NOTICE). Do not edit vendored fixtures; add new cases as separate
   files.

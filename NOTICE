@@ -1,6 +1,6 @@
-wasm-bundle
+wasm-fuse
 
-Copyright (c) 2026 the wasm-bundle contributors
+Copyright (c) 2026 the wasm-fuse contributors
 
 This product includes test fixtures derived from the binaryen project
 (https://github.com/WebAssembly/binaryen), specifically the wasm-merge test
@@ -8,6 +8,6 @@ suite under test/lit/merge/, used under the terms of the Apache License,
 Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). The vendored files
 live under tests/fixtures/binaryen/ and retain their original content apart
 from the removal of auto-generated lit/FileCheck assertion comments and
-adaptations marked with "Adapted for wasm-bundle" comments in the files
+adaptations marked with "Adapted for wasm-fuse" comments in the files
 themselves (binaryen-specific legacy syntax rewritten as its standard
 equivalent).

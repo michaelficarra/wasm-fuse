@@ -1,11 +1,11 @@
 //! Scenarios ported from binaryen's wasm-merge test suite
 //! (`test/lit/merge/`, vendored under `tests/fixtures/binaryen/merge/`; see
 //! NOTICE). Each test uses the original `RUN:` line's modules, with its flags
-//! translated to wasm-bundle's own interface (the CLI deliberately does not
+//! translated to wasm-fuse's own interface (the CLI deliberately does not
 //! copy wasm-merge's flags): `--rename-export-conflicts` →
 //! `--export-conflicts rename`, `--skip-export-conflicts` →
 //! `--export-conflicts skip`, `-S` → `--text`, and `-all` → nothing, since
-//! wasm-bundle always accepts every proposal.
+//! wasm-fuse always accepts every proposal.
 //!
 //! The original tests assert binaryen's printed output via FileCheck; our
 //! text output comes from wasmprinter and is formatted (and numbered)
@@ -25,10 +25,10 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Run `wasm-bundle` over `(file, name)` module pairs with `flags`, returning
+/// Run `wasm-fuse` over `(file, name)` module pairs with `flags`, returning
 /// the process output.
 fn merge(modules: &[(&str, &str)], flags: &[&str]) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_wasm-bundle"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_wasm-fuse"));
     for (file, name) in modules {
         command.arg(format!("{name}={}", fixture(file).display()));
     }

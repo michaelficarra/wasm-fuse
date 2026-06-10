@@ -1,6 +1,6 @@
 //! Merge multiple WebAssembly core modules into a single module.
 //!
-//! `wasm-bundle` is a Rust counterpart to binaryen's `wasm-merge`, built on the
+//! `wasm-fuse` is a Rust counterpart to binaryen's `wasm-merge`, built on the
 //! Bytecode Alliance wasm-tools crates. Each input module is given a name, and
 //! imports in any module of the form `(import "name" "item" …)` — where `name`
 //! is the name of another input module — are resolved ("fused") at merge time
@@ -17,7 +17,7 @@
 //! # Example
 //!
 //! ```
-//! use wasm_bundle::{MergeOptions, Merger};
+//! use wasm_fuse::{MergeOptions, Merger};
 //!
 //! let library = wat::parse_str(r#"(module (func (export "answer") (result i32) i32.const 42))"#)?;
 //! let application = wat::parse_str(r#"

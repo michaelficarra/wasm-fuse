@@ -1,8 +1,8 @@
-# wasm-bundle — project plan
+# wasm-fuse — project plan
 
 ## Context
 
-`wasm-bundle` is a Rust reimplementation of [binaryen's `wasm-merge`](https://github.com/WebAssembly/binaryen/blob/main/src/tools/wasm-merge.cpp):
+`wasm-fuse` is a Rust reimplementation of [binaryen's `wasm-merge`](https://github.com/WebAssembly/binaryen/blob/main/src/tools/wasm-merge.cpp):
 it merges multiple WebAssembly core modules into a single module, resolving imports in one
 module against exports of another at merge time (the way a JS bundler turns runtime linking
 into build-time linking). Unlike `wasm-merge` it is built on Bytecode Alliance plumbing
@@ -60,7 +60,7 @@ Dependency management follows community battery packs via [`cargo-bp`](https://c
   (some of) its imports.
 - **Testing**: binaryen's `test/lit/merge` inputs are vendored under
   `tests/fixtures/binaryen/` (Apache-2.0, with NOTICE); integration tests drive the real
-  binary via `std::process::Command` + `env!("CARGO_BIN_EXE_wasm-bundle")`; snapshot tests
+  binary via `std::process::Command` + `env!("CARGO_BIN_EXE_wasm-fuse")`; snapshot tests
   cover merged text output; unit tests cover remap/resolution logic.
 
 ## Phases
@@ -104,7 +104,7 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       those). NB: like wasm-merge, inputs are never validated individually — only the
       merged output is (an input may only become valid once merged, e.g. ref.func of an
       import fused to an exported definition).
-- [x] CLI: initially mirrored wasm-merge's flags; redesigned same day to wasm-bundle's
+- [x] CLI: initially mirrored wasm-merge's flags; redesigned same day to wasm-fuse's
       own best-practice interface (see Architecture decisions) at the owner's direction.
 - [x] Binaryen fixtures vendored (`tests/fixtures/binaryen/merge/`, CHECK comments
       stripped, legacy-EH syntax in renamings adapted to try_table — see NOTICE);

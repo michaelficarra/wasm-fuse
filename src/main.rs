@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use anstream::eprintln;
 use anstyle::AnsiColor;
 use clap::{Parser, ValueEnum};
-use wasm_bundle::{ExportConflictPolicy, ExportSelection, MergeOptions, Merger};
+use wasm_fuse::{ExportConflictPolicy, ExportSelection, MergeOptions, Merger};
 use wasmparser::WasmFeatures;
 
 /// Merge multiple WebAssembly modules into one.
@@ -15,7 +15,7 @@ use wasmparser::WasmFeatures;
 /// resolved to that module's exports at merge time. Imports of modules outside
 /// the input set are left as imports.
 #[derive(Parser)]
-#[command(version, about, name = "wasm-bundle")]
+#[command(version, about, name = "wasm-fuse")]
 struct Cli {
     /// Input modules, as PATH or NAME=PATH
     ///

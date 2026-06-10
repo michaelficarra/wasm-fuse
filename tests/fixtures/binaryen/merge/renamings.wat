@@ -89,7 +89,7 @@
 
   (func $uses (param $array (ref $array))
     ;; Tags.
-    ;; Adapted for wasm-bundle: binaryen's legacy (try (do) (catch ... (pop)))
+    ;; Adapted for wasm-fuse: binaryen's legacy (try (do) (catch ... (pop)))
     ;; here was rewritten as standard try_table; see NOTICE.
     (drop
       (block $legacy_catch_foo (result i32)

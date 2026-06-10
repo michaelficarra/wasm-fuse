@@ -1,11 +1,11 @@
-//! Integration tests that exercise the `wasm-bundle` binary the way a user
+//! Integration tests that exercise the `wasm-fuse` binary the way a user
 //! would, via `std::process::Command`.
 
 use std::process::Command;
 
-/// The path to the compiled `wasm-bundle` binary under test.
-fn wasm_bundle() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_wasm-bundle"))
+/// The path to the compiled `wasm-fuse` binary under test.
+fn wasm_fuse() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_wasm-fuse"))
 }
 
 fn fixture(name: &str) -> String {
@@ -18,7 +18,7 @@ fn fixture(name: &str) -> String {
 
 #[test]
 fn help_succeeds() {
-    let output = wasm_bundle().arg("--help").output().unwrap();
+    let output = wasm_fuse().arg("--help").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("[NAME=]PATH"));
@@ -26,18 +26,18 @@ fn help_succeeds() {
 
 #[test]
 fn version_matches_cargo_metadata() {
-    let output = wasm_bundle().arg("--version").output().unwrap();
+    let output = wasm_fuse().arg("--version").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert_eq!(
         stdout.trim(),
-        format!("wasm-bundle {}", env!("CARGO_PKG_VERSION"))
+        format!("wasm-fuse {}", env!("CARGO_PKG_VERSION"))
     );
 }
 
 #[test]
 fn empty_module_name_is_an_error() {
-    let output = wasm_bundle().arg("=nameless.wasm").output().unwrap();
+    let output = wasm_fuse().arg("=nameless.wasm").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
@@ -65,7 +65,7 @@ fn module_names_default_to_file_stems() {
             (func (export "main") (result i32) (call $f)))"#,
     )
     .unwrap();
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(&app)
         .arg(&lib)
         .args(["--text", "-o", "-"])
@@ -85,7 +85,7 @@ fn module_names_default_to_file_stems() {
 
 #[test]
 fn output_is_binary_by_default() {
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(format!("first={}", fixture("chain.wat")))
         .args(["-o", "-"])
         .output()
@@ -101,7 +101,7 @@ fn output_is_binary_by_default() {
 fn output_file_is_written() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("merged.wasm");
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(format!("first={}", fixture("chain.wat")))
         .arg("-o")
         .arg(&out)
@@ -115,7 +115,7 @@ fn output_file_is_written() {
 fn single_module_merge_is_an_identity_operation() {
     // Merging one module with no fusable imports must produce an equivalent
     // module.
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(format!("only={}", fixture("chain.wat")))
         .args(["--text", "-o", "-"])
         .output()
@@ -127,7 +127,7 @@ fn single_module_merge_is_an_identity_operation() {
 
 #[test]
 fn duplicate_module_names_are_an_error() {
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(format!("same={}", fixture("chain.wat")))
         .arg(format!("same={}", fixture("chain.wat.second")))
         .args(["-o", "-"])
@@ -152,7 +152,7 @@ fn imports_of_modules_outside_the_input_set_are_preserved() {
             (func (export "main") (call $print (i32.const 0))))"#,
     )
     .unwrap();
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(format!("app={}", uses_env.display()))
         .args(["--text", "-o", "-"])
         .output()
@@ -170,7 +170,7 @@ fn binary_and_text_inputs_can_be_mixed() {
     let dir = tempfile::tempdir().unwrap();
     let binary = dir.path().join("chain.wasm");
     std::fs::write(&binary, wat::parse_file(fixture("chain.wat")).unwrap()).unwrap();
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(format!("first={}", binary.display()))
         .arg(format!("second={}", fixture("chain.wat.second")))
         .args(["--text", "-o", "-"])
@@ -204,7 +204,7 @@ fn many_modules_fuse_along_a_chain() {
         std::fs::write(&path, source).unwrap();
         args.push(format!("module{index}={}", path.display()));
     }
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .args(args)
         .args(["--export-conflicts=rename", "--text", "-o", "-"])
         .output()
@@ -225,7 +225,7 @@ fn many_modules_fuse_along_a_chain() {
 fn no_validate_skips_import_export_checking() {
     // types.wat deliberately mismatches imports and exports; with
     // --no-validate the merge must succeed anyway, like wasm-merge with -n.
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .arg(format!("env={}", fixture("types.wat")))
         .args(["--no-validate", "-o", "-"])
         .output()
@@ -239,7 +239,7 @@ fn no_validate_skips_import_export_checking() {
 
 #[test]
 fn missing_input_file_is_a_readable_error() {
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .args(["ghost=does-not-exist.wasm", "-o", "-"])
         .output()
         .unwrap();
@@ -278,7 +278,7 @@ fn write_entry_fixtures(dir: &std::path::Path) -> (String, String) {
 fn entry_mode_exports_only_the_entry_module() {
     let dir = tempfile::tempdir().unwrap();
     let (app, lib) = write_entry_fixtures(dir.path());
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .args([&app, &lib])
         .args(["--entry", "app", "--text", "-o", "-"])
         .output()
@@ -311,7 +311,7 @@ fn entry_mode_exports_only_the_entry_module() {
 fn entry_mode_with_unknown_module_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
     let (app, lib) = write_entry_fixtures(dir.path());
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .args([&app, &lib])
         .args(["--entry", "ghost", "-o", "-"])
         .output()
@@ -330,7 +330,7 @@ fn entry_mode_rejects_export_conflict_policy() {
     // reject the combination.
     let dir = tempfile::tempdir().unwrap();
     let (app, lib) = write_entry_fixtures(dir.path());
-    let output = wasm_bundle()
+    let output = wasm_fuse()
         .args([&app, &lib])
         .args(["--entry", "app", "--export-conflicts=rename"])
         .output()
