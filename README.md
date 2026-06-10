@@ -1,6 +1,6 @@
 # wasm-fuse
 
-[![CI](https://github.com/michaelficarra/wasm-bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelficarra/wasm-bundle/actions/workflows/ci.yml)
+[![CI](https://github.com/michaelficarra/wasm-fuse/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelficarra/wasm-fuse/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/wasm-fuse.svg)](https://crates.io/crates/wasm-fuse)
 [![docs.rs](https://docs.rs/wasm-fuse/badge.svg)](https://docs.rs/wasm-fuse)
 
@@ -20,8 +20,8 @@ The merged module's exports can be either the **union** of every input's exports
 (what `wasm-merge` produces) or, with `--entry`, just the **entry-point module's**
 exports — the other modules then only serve to satisfy (some of) its imports.
 
-> **Status**: under active development towards full `wasm-merge` parity; see
-> [PLAN.md](PLAN.md) for the roadmap and current parity checklist.
+> **Status**: at full `wasm-merge` capability parity (see the checklist in
+> [PLAN.md](PLAN.md)), not yet published to crates.io.
 
 ## Installation as a CLI
 

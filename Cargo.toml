@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 # Floor set by human-panic 2.0.6+ (via sysinfo); revisit if a library
 # consumer ever needs an older toolchain.
 rust-version = "1.88.0"
-repository = "https://github.com/michaelficarra/wasm-bundle"
+repository = "https://github.com/michaelficarra/wasm-fuse"
 keywords = ["wasm", "webassembly", "merge", "bundler", "linker"]
 categories = ["wasm", "command-line-utilities", "development-tools"]
 

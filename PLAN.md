@@ -237,11 +237,12 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
   toggles). Added export selection modes: union (wasm-merge behaviour) vs `--entry NAME`
   / `ExportSelection::Entry` (only the entry module's exports; other modules just
   satisfy its imports). GitHub remote added; CI running upstream.
-- 2026-06-09: crate renamed to `wasm-fuse` (wasm-bundle was taken on crates.io); the
-  GitHub repository is still named wasm-bundle — update Cargo.toml `repository` and the
-  README CI badge if it gets renamed. Fixed the minimal-versions CI job by declaring
-  the dependency minimums we actually test (and a documented lazy_static raise for
-  sharded-slab's dishonest minimum), verified locally with the job's own commands.
+- 2026-06-09: crate renamed to `wasm-fuse` (wasm-bundle was taken on crates.io). Fixed
+  the minimal-versions CI job by declaring the dependency minimums we actually test
+  (and a documented lazy_static raise for sharded-slab's dishonest minimum), verified
+  locally with the job's own commands. (The GitHub repository was later renamed to
+  match; Cargo.toml `repository` and the README badge now point at
+  michaelficarra/wasm-fuse.)
 - 2026-06-09: Phase 2 complete — opt-in pruning landed (--prune /
   MergeOptions::prune_unused) with five behaviour tests (unused library code, unused
   imports, start-function liveness, dead table+segment removal, call_indirect keep-
