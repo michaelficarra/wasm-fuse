@@ -1,0 +1,27 @@
+[package]
+name = "wasm_fuse-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+wasm-fuse = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_merge"
+path = "fuzz_targets/fuzz_merge.rs"
+doc = false
+
+[dependencies.wasm-smith]
+version = "0.251"
+
+[dependencies.wasmparser]
+version = "0.251"
