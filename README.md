@@ -51,6 +51,10 @@ wasm-fuse app.wasm lib.wasm --entry app -o merged.wasm
 # never reach (wasm-merge does this unconditionally; here it is opt-in)
 wasm-fuse app.wasm lib.wasm --entry app --prune -o merged.wasm
 
+# Keep debug names (the "name" custom section), remapped onto the merged
+# indices — wasm-merge's -g
+wasm-fuse app.wasm lib.wasm -g -o merged.wasm
+
 # When unioning exports, pick a conflict policy: error (default),
 # rename (appends _1, _2, ...), or skip (first export wins)
 wasm-fuse a.wasm b.wasm --export-conflicts rename -o out.wasm

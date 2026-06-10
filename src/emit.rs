@@ -102,6 +102,7 @@ pub(crate) fn emit(
     exports: &[SurvivingExport],
     live: Option<&Liveness>,
     canon: &TypeCanon,
+    name_section: Option<&wasm_encoder::NameSection>,
 ) -> Result<Vec<u8>, MergeError> {
     let def_live = |kind: Kind, module: usize, def_index: u32| {
         live.is_none_or(|live| live.def(kind, module, def_index))
@@ -342,6 +343,10 @@ pub(crate) fn emit(
     }
     if !data.is_empty() {
         module.section(&data);
+    }
+
+    if let Some(names) = name_section {
+        module.section(names);
     }
 
     Ok(module.finish())

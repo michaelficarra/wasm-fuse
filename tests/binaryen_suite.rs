@@ -187,14 +187,25 @@ fn memory_data() {
 
 #[test]
 fn names() {
-    // The binaryen test runs with -g to check name-section handling, which we
-    // don't support yet (PLAN.md phase 4); the merge of its modules — with
-    // GC types, duplicate names, unnamed items — must still work.
+    // Without --keep-names, the merge of these modules — GC types, duplicate
+    // names, unnamed items — must work and drop the names.
     let text = merge_to_text(
         &[("names.wat", "first"), ("names.wat.second", "second")],
         &[],
     );
     assert_data_eq!(text, file!["snapshots/names.wat"]);
+}
+
+#[test]
+fn names_kept() {
+    // The original test runs wasm-merge -g: debug names survive the merge,
+    // remapped onto merged indices (duplicate names across modules are fine
+    // in a names section; the printer disambiguates).
+    let text = merge_to_text(
+        &[("names.wat", "first"), ("names.wat.second", "second")],
+        &["--keep-names"],
+    );
+    assert_data_eq!(text, file!["snapshots/names.keep.wat"]);
 }
 
 #[test]

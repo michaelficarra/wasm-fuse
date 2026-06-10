@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
 use wasmparser::{
-    Data, Element, Export, ExternalKind, FunctionBody, Global, Import, MemoryType, Parser, Payload,
-    RecGroup, Table, TagType, TypeRef,
+    Data, Element, Export, ExternalKind, FunctionBody, Global, Import, KnownCustom, MemoryType,
+    Name, Parser, Payload, RecGroup, Table, TagType, TypeRef,
 };
 
 use crate::merge::MergeError;
@@ -103,6 +103,8 @@ pub(crate) struct ParsedModule<'a> {
     pub(crate) datas: Vec<Data<'a>>,
     pub(crate) code: Vec<FunctionBody<'a>>,
     pub(crate) has_data_count: bool,
+    /// Entries of the "name" custom section, kept for `keep_names`.
+    pub(crate) names: Vec<Name<'a>>,
 }
 
 impl<'a> ParsedModule<'a> {
@@ -156,6 +158,7 @@ pub(crate) fn parse_module<'a>(
         datas: Vec::new(),
         code: Vec::new(),
         has_data_count: false,
+        names: Vec::new(),
     };
 
     let invalid = |source: wasmparser::BinaryReaderError| MergeError::InvalidModule {
@@ -224,8 +227,20 @@ pub(crate) fn parse_module<'a>(
                 }
             }
             Payload::CodeSectionEntry(body) => module.code.push(body),
-            // Custom sections (including names) are dropped for now; see
-            // PLAN.md phase 4.
+            Payload::CustomSection(section) => {
+                // Names are advisory debug info: a malformed name subsection
+                // is skipped rather than failing the merge.
+                if let KnownCustom::Name(reader) = section.as_known() {
+                    for entry in reader {
+                        match entry {
+                            Ok(name) => module.names.push(name),
+                            Err(_) => break,
+                        }
+                    }
+                }
+                // Other custom sections are dropped for now; see PLAN.md
+                // phase 4 (source maps, annotations).
+            }
             _ => {}
         }
     }

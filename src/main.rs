@@ -60,6 +60,10 @@ struct Cli {
     #[arg(long)]
     prune: bool,
 
+    /// Keep debug names (the "name" custom section), with indices remapped
+    #[arg(short = 'g', long)]
+    keep_names: bool,
+
     /// Skip output validation and import/export compatibility checking
     #[arg(long)]
     no_validate: bool,
@@ -140,6 +144,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         features: WasmFeatures::all(),
         validate: !cli.no_validate,
         prune_unused: cli.prune,
+        keep_names: cli.keep_names,
     };
 
     let mut merger = Merger::new(options);

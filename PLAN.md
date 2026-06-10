@@ -150,10 +150,18 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 - [x] memory64/table64 (`table64.wat`) — covered since phase 1.
 
 ### Phase 4 — Debug info, names, source maps
-- [ ] `-g`/`--debuginfo`: merge names sections (module/function/local/type/etc.) with
-      remapped indices (`names.wat`).
-- [ ] Source maps: `-ism` per input, `-osm`, `-osu` (`sourcemap.wat`).
-- [ ] Code annotations / branch hints (`annotations.wat`, `annotations-func-only.wat`).
+- [x] `-g`/`--keep-names` (`src/names.rs`): merges the inputs' name sections — module,
+      function, local, label, type (canonical indices), table, memory, global, element,
+      data, field, tag names — with indices remapped, pruned items' names dropped, and
+      the definition's name beating a fused import's alias. The synthetic combined start
+      is named `merged.start.combined` like wasm-merge. Malformed name subsections are
+      skipped (advisory data), never a merge failure. `names.wat` ported with and
+      without the flag.
+- [ ] Source maps: `-ism` per input, `-osm`, `-osu` (`sourcemap.wat`). Needs
+      input-offset → output-offset tracking through code re-encoding (override
+      parse_function_body to record per-instruction positions).
+- [ ] Code annotations / branch hints (`annotations.wat`, `annotations-func-only.wat`)
+      — same offset-tracking infrastructure.
 
 ### Phase 5 — Full parity & hardening
 - [ ] `--output-manifest` (wasm-split manifest; implies `-g`) (`manifest.wat`).
@@ -181,6 +189,7 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 | func_subtyping.wat / func_subtyping_return.wat | function subtyping (GC) | ✅ ported (precise merge-time checks via canonical supertype chains) |
 | global_subtyping.wat | global subtyping (GC) | ✅ ported (ditto) |
 | table64.wat | 64-bit tables | ✅ ported |
+| names.wat with -g | name-section merging | ✅ ported (`names_kept`, plus alias/synthetic-start/prune behaviour tests) |
 | sourcemap.wat | source map preservation | ⏳ phase 4 (ignored test in place) |
 | annotations.wat / annotations-func-only.wat | branch hints / annotations | ⏳ phase 4 (ignored test in place) |
 | manifest.wat | `--output-manifest` | ⏳ phase 5 (ignored test in place) |

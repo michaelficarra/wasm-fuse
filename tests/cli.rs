@@ -615,3 +615,109 @@ fn concrete_subtypes_satisfy_imports_across_modules() {
         "the rec groups should have deduplicated: {text}"
     );
 }
+
+#[test]
+fn keep_names_prefers_the_definitions_name_over_an_import_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.wat");
+    let app = dir.path().join("app.wat");
+    std::fs::write(
+        &lib,
+        r#"(module (func $real_name (export "f") (result i32) (i32.const 1)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &app,
+        r#"(module
+            (import "lib" "f" (func $local_alias (result i32)))
+            (func $main (export "main") (result i32) (call $local_alias)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .args([&app, &lib])
+        .args(["--keep-names", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("$real_name"),
+        "missing definition name: {text}"
+    );
+    assert!(
+        !text.contains("$local_alias"),
+        "the fused import's alias should lose to the definition's name: {text}"
+    );
+    assert!(text.contains("$main"), "missing app function name: {text}");
+}
+
+#[test]
+fn keep_names_names_the_synthetic_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first.wat");
+    let second = dir.path().join("second.wat");
+    std::fs::write(&first, r#"(module (func $init1) (start $init1))"#).unwrap();
+    std::fs::write(&second, r#"(module (func $init2) (start $init2))"#).unwrap();
+    let output = wasm_fuse()
+        .args([&first, &second])
+        .args(["--keep-names", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("(start $merged.start.combined"),
+        "synthetic start should carry wasm-merge's conventional name: {text}"
+    );
+}
+
+#[test]
+fn names_of_pruned_items_are_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let module = dir.path().join("module.wat");
+    std::fs::write(
+        &module,
+        r#"(module
+            (func $kept (export "kept") (result i32) (i32.const 1))
+            (func $dropped (result i32) (i32.const 2)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(&module)
+        .args(["--keep-names", "--prune", "--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("$kept"), "{text}");
+    assert!(
+        !text.contains("$dropped"),
+        "pruned items should lose their names: {text}"
+    );
+}
+
+#[test]
+fn names_are_dropped_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let module = dir.path().join("module.wat");
+    std::fs::write(
+        &module,
+        r#"(module (func $named (export "f") (result i32) (i32.const 1)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .arg(&module)
+        .args(["--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !text.contains("$named"),
+        "names should be dropped without --keep-names: {text}"
+    );
+}

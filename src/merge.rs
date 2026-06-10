@@ -3,7 +3,7 @@
 
 use wasmparser::WasmFeatures;
 
-use crate::{check, emit, parse, prune, resolve, types};
+use crate::{check, emit, names, parse, prune, resolve, types};
 
 /// What to do when two input modules export the same name (in
 /// [`ExportSelection::Union`] mode).
@@ -58,6 +58,12 @@ pub struct MergeOptions {
     /// [`ExportSelection::Entry`] this tree-shakes a bundle down to what the
     /// entry-point module actually uses.
     pub prune_unused: bool,
+    /// Merge the inputs' "name" custom sections (debug names for functions,
+    /// locals, types, …) into the output, with indices remapped. Names of
+    /// pruned items are dropped; where a fused import's local alias and its
+    /// definition's name disagree, the definition wins. Off by default, like
+    /// wasm-merge without `-g`.
+    pub keep_names: bool,
 }
 
 impl Default for MergeOptions {
@@ -67,6 +73,7 @@ impl Default for MergeOptions {
             features: WasmFeatures::default(),
             validate: true,
             prune_unused: false,
+            keep_names: false,
         }
     }
 }
@@ -227,7 +234,25 @@ impl Merger {
             check::check_fused(&parsed, &mut resolution, &canon)?;
         }
 
-        let output = emit::emit(&parsed, &layout, &exports, liveness.as_ref(), &canon)?;
+        let name_section = if self.options.keep_names {
+            let starts = parsed
+                .iter()
+                .filter(|module| module.start.is_some())
+                .count();
+            let synthetic_start = (starts > 1).then_some(layout.func_count);
+            names::build(&parsed, &mut resolution, &layout, &canon, synthetic_start)?
+        } else {
+            None
+        };
+
+        let output = emit::emit(
+            &parsed,
+            &layout,
+            &exports,
+            liveness.as_ref(),
+            &canon,
+            name_section.as_ref(),
+        )?;
 
         if self.options.validate {
             wasmparser::Validator::new_with_features(self.options.features)
