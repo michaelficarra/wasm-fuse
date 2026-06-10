@@ -1,0 +1,56 @@
+[package]
+name = "wasm-bundle"
+version = "0.1.0"
+edition = "2024"
+description = "Merge multiple WebAssembly modules into one — a Rust counterpart to binaryen's wasm-merge"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85.0"
+# TODO: set the real repository URL before publishing
+repository = "https://github.com/OWNER/wasm-bundle"
+keywords = ["wasm", "webassembly", "merge", "bundler", "linker"]
+categories = ["wasm", "command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "wasm-bundle"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+# Everything the binary needs beyond the library; library consumers can use
+# `default-features = false` to avoid pulling in CLI dependencies.
+cli = [
+    "dep:anstream",
+    "dep:anstyle",
+    "dep:anyhow",
+    "dep:clap",
+    "dep:colorchoice-clap",
+    "dep:human-panic",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:wild",
+]
+
+[dependencies]
+# Bytecode Alliance plumbing (the wasm-tools family)
+wasm-encoder = { version = "0.251", features = ["wasmparser"] }
+wasmparser = "0.251"
+wasmprinter = "0.251"
+wat = "1.251"
+# error battery pack (library side)
+thiserror = "2"
+
+# cli battery pack (all optional, enabled by the `cli` feature)
+anstream = { version = "1.0.0", optional = true }
+anstyle = { version = "1.0.14", optional = true }
+anyhow = { version = "1", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+colorchoice-clap = { version = "1.0.8", optional = true }
+human-panic = { version = "2.0.8", optional = true }
+wild = { version = "2.2.1", optional = true }
+
+# logging battery pack (CLI diagnostics)
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+[dev-dependencies]
+snapbox = { version = "1.2.1", features = ["cmd"] }

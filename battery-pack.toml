@@ -1,0 +1,57 @@
+version = 1
+
+[[battery-pack]]
+name = "error"
+features = ["default"]
+
+[[battery-pack.managed-deps]]
+name = "anyhow"
+version = "1"
+
+[[battery-pack.managed-deps]]
+name = "thiserror"
+version = "2"
+
+[[battery-pack]]
+name = "cli"
+features = ["default"]
+
+[[battery-pack.managed-deps]]
+name = "anstream"
+version = "1.0.0"
+
+[[battery-pack.managed-deps]]
+name = "anstyle"
+version = "1.0.14"
+
+[[battery-pack.managed-deps]]
+name = "anyhow"
+version = "1"
+
+[[battery-pack.managed-deps]]
+name = "clap"
+version = "4"
+
+[[battery-pack.managed-deps]]
+name = "colorchoice-clap"
+version = "1.0.8"
+
+[[battery-pack.managed-deps]]
+name = "human-panic"
+version = "2.0.8"
+
+[[battery-pack.managed-deps]]
+name = "wild"
+version = "2.2.1"
+
+[[battery-pack]]
+name = "logging"
+features = ["default"]
+
+[[battery-pack.managed-deps]]
+name = "tracing"
+version = "0.1"
+
+[[battery-pack.managed-deps]]
+name = "tracing-subscriber"
+version = "0.3"
