@@ -404,7 +404,47 @@ fn annotations_func_only() {
 }
 
 #[test]
-#[ignore = "--output-manifest is not yet supported (PLAN.md phase 5)"]
 fn manifest() {
-    unimplemented!("port manifest.wat once --output-manifest is implemented");
+    // Three modules; the manifest lists every module but the primary one,
+    // with the post-merge names of its defined functions, and the merged
+    // binary keeps function names (--output-manifest implies names).
+    let dir = tempfile::tempdir().unwrap();
+    let manifest_path = dir.path().join("merged.manifest");
+    let out = dir.path().join("merged.wasm");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_wasm-fuse"));
+    for (file, name) in [
+        ("manifest.wat", "first"),
+        ("manifest.wat.second", "second"),
+        ("manifest.wat.third", "third"),
+    ] {
+        command.arg(format!("{name}={}", fixture(file).display()));
+    }
+    let output = command
+        .arg("--output-manifest")
+        .arg(&manifest_path)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "merge failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    assert_eq!(manifest, "second\nbaz\n\nthird\nqux\n\n");
+
+    // The original function names survive in the binary.
+    let text = merge_to_text(
+        &[
+            ("manifest.wat", "first"),
+            ("manifest.wat.second", "second"),
+            ("manifest.wat.third", "third"),
+        ],
+        &["--keep-names"],
+    );
+    for name in ["$foo", "$bar", "$baz", "$qux"] {
+        assert!(text.contains(name), "missing {name}: {text}");
+    }
 }

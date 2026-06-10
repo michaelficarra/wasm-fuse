@@ -76,6 +76,13 @@ struct Cli {
     #[arg(long, value_name = "URL")]
     source_map_url: Option<String>,
 
+    /// Write a wasm-split manifest to this path (implies --keep-names)
+    ///
+    /// Lists, for every module except the first, the post-merge names of
+    /// its functions, so wasm-split can separate the merged module again.
+    #[arg(long, value_name = "PATH")]
+    output_manifest: Option<PathBuf>,
+
     /// Skip output validation and import/export compatibility checking
     #[arg(long)]
     no_validate: bool,
@@ -158,6 +165,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         prune_unused: cli.prune,
         keep_names: cli.keep_names,
         source_map_url: cli.source_map_url.clone(),
+        emit_manifest: cli.output_manifest.is_some(),
     };
 
     let mut merger = Merger::new(options);
@@ -199,6 +207,14 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             r#"{"version":3,"sources":[],"names":[],"mappings":""}"#.to_string()
         });
         std::fs::write(path, map)
+            .map_err(|error| anyhow::anyhow!("failed to write {}: {error}", path.display()))?;
+    }
+
+    if let Some(path) = &cli.output_manifest {
+        let manifest = merged
+            .manifest
+            .expect("emit_manifest was set, so a manifest is produced");
+        std::fs::write(path, manifest)
             .map_err(|error| anyhow::anyhow!("failed to write {}: {error}", path.display()))?;
     }
     Ok(())

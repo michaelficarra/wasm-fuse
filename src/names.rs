@@ -77,15 +77,22 @@ impl<'a> IndirectNames<'a> {
     }
 }
 
-/// Build the merged module's name section, or `None` if no input carried any
-/// names.
-pub(crate) fn build(
-    parsed: &[ParsedModule<'_>],
+/// The merged debug names.
+pub(crate) struct BuiltNames<'a> {
+    /// The encoded name section, or `None` if no input carried any names.
+    pub(crate) section: Option<wasm_encoder::NameSection>,
+    /// Merged function index → name, for the manifest.
+    pub(crate) functions: BTreeMap<u32, &'a str>,
+}
+
+/// Build the merged module's debug names.
+pub(crate) fn build<'a>(
+    parsed: &'a [ParsedModule<'a>],
     resolution: &mut Resolution<'_>,
     layout: &Layout,
     canon: &TypeCanon,
     synthetic_start: Option<u32>,
-) -> Result<Option<wasm_encoder::NameSection>, MergeError> {
+) -> Result<BuiltNames<'a>, MergeError> {
     let mut module_name: Option<&str> = None;
     let mut functions = Names::default();
     let mut locals = IndirectNames::default();
@@ -285,5 +292,46 @@ pub(crate) fn build(
         section.tags(&tags.encode());
         any = true;
     }
-    Ok(any.then_some(section))
+    Ok(BuiltNames {
+        section: any.then_some(section),
+        functions: functions
+            .entries
+            .iter()
+            .map(|(&index, &(_, name))| (index, name))
+            .collect(),
+    })
+}
+
+/// Build the wasm-split manifest: for every module except the primary
+/// (first) one, its name followed by the post-merge names of its surviving
+/// defined functions, with a blank line after each group. Functions without
+/// a debug name are listed by their merged index.
+pub(crate) fn manifest(
+    parsed: &[ParsedModule<'_>],
+    layout: &Layout,
+    function_names: &BTreeMap<u32, &str>,
+) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    for (module_idx, module) in parsed.iter().enumerate().skip(1) {
+        out.push_str(&module.name);
+        out.push('\n');
+        let import_count = module.import_count(Kind::Func);
+        for def_index in 0..module.defined_count(Kind::Func) {
+            let merged = layout.remaps[module_idx].funcs[(import_count + def_index) as usize];
+            if merged == PRUNED {
+                continue;
+            }
+            match function_names.get(&merged) {
+                Some(name) => out.push_str(name),
+                None => {
+                    let _ = write!(out, "{merged}");
+                }
+            }
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out
 }

@@ -68,6 +68,13 @@ pub struct MergeOptions {
     /// pointing consumers at the merged source map (wasm-merge's
     /// `--output-source-map-url`).
     pub source_map_url: Option<String>,
+    /// Produce a wasm-split manifest in [`Merged::manifest`]: for every
+    /// module except the first (primary) one, its name followed by the
+    /// post-merge names of its surviving defined functions. Implies
+    /// [`keep_names`](MergeOptions::keep_names), like wasm-merge's
+    /// `--output-manifest` implies `-g`, so wasm-split can match the names
+    /// against the binary.
+    pub emit_manifest: bool,
 }
 
 impl Default for MergeOptions {
@@ -79,6 +86,7 @@ impl Default for MergeOptions {
             prune_unused: false,
             keep_names: false,
             source_map_url: None,
+            emit_manifest: false,
         }
     }
 }
@@ -192,6 +200,9 @@ pub struct Merged {
     /// The merged source map (JSON), present when any input had one attached
     /// via [`Merger::add_source_map`].
     pub source_map: Option<String>,
+    /// The wasm-split manifest, present when
+    /// [`MergeOptions::emit_manifest`] is set.
+    pub manifest: Option<String>,
 }
 
 /// Merges named WebAssembly modules into a single module.
@@ -292,16 +303,33 @@ impl Merger {
             check::check_fused(&parsed, &mut resolution, &canon)?;
         }
 
-        let name_section = if self.options.keep_names {
+        // The manifest lists functions by their debug names, so it forces
+        // names on, like wasm-merge's --output-manifest implies -g.
+        let keep_names = self.options.keep_names || self.options.emit_manifest;
+        let built_names = if keep_names {
             let starts = parsed
                 .iter()
                 .filter(|module| module.start.is_some())
                 .count();
             let synthetic_start = (starts > 1).then_some(layout.func_count);
-            names::build(&parsed, &mut resolution, &layout, &canon, synthetic_start)?
+            Some(names::build(
+                &parsed,
+                &mut resolution,
+                &layout,
+                &canon,
+                synthetic_start,
+            )?)
         } else {
             None
         };
+        let manifest = self.options.emit_manifest.then(|| {
+            let empty = std::collections::BTreeMap::new();
+            let function_names = built_names
+                .as_ref()
+                .map_or(&empty, |names| &names.functions);
+            names::manifest(&parsed, &layout, function_names)
+        });
+        let name_section = built_names.and_then(|names| names.section);
 
         let track_offsets = self.inputs.iter().any(|input| input.source_map.is_some());
         let config = emit::EmitConfig {
@@ -332,6 +360,7 @@ impl Merger {
         Ok(Merged {
             module: output,
             source_map,
+            manifest,
         })
     }
 }
