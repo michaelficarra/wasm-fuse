@@ -10,7 +10,7 @@
 //!
 //! # Example
 //!
-//! ```no_run
+//! ```
 //! use wasm_bundle::{MergeOptions, Merger};
 //!
 //! let library = wat::parse_str(r#"(module (func (export "answer") (result i32) i32.const 42))"#)?;
@@ -27,6 +27,11 @@
 //! # let _ = merged;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
+mod check;
+mod emit;
 mod merge;
+mod parse;
+mod remap;
+mod resolve;
 
 pub use merge::{ExportConflictPolicy, MergeError, MergeOptions, Merger};

@@ -7,4 +7,7 @@ This product includes test fixtures derived from the binaryen project
 suite under test/lit/merge/, used under the terms of the Apache License,
 Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0). The vendored files
 live under tests/fixtures/binaryen/ and retain their original content apart
-from the removal of lit/FileCheck harness comments where noted.
+from the removal of auto-generated lit/FileCheck assertion comments and
+adaptations marked with "Adapted for wasm-bundle" comments in the files
+themselves (binaryen-specific legacy syntax rewritten as its standard
+equivalent).

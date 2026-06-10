@@ -76,21 +76,38 @@ Dependency management follows community battery packs via [`cargo-bp`](https://c
 - NB: `repository` in Cargo.toml and badge URLs use an OWNER placeholder until a GitHub
       remote exists.
 
-### Phase 1 — MVP merge engine
+### Phase 1 — MVP merge engine  ✅
 Goal: merge real modules with import fusing; cover the core binaryen test scenarios.
-- [ ] Library API: `Merger::new(options).add_module(name, bytes)?…merge() -> Vec<u8>`;
-      `MergeOptions { export_conflicts: Error|Rename|Skip, validate, features, debug_names }`.
-- [ ] Collect pass: per-module items, export maps, import resolution (transitive, cycle
-      error), per-kind remap tables; unresolved imports first in each index space.
-- [ ] Emit pass: all sections re-encoded with remapping (types/rec groups copied verbatim
-      without dedup for now), start fusion, export conflict policies, output validation.
-- [ ] Global reordering (topological sort of init-expr dependencies).
-- [ ] CLI: positional pairs, `-o` (`-` = stdout), `-S`, `-rec`, `-sec`, `-n`.
-- [ ] Vendor binaryen fixtures; integration tests for: chain, cycle, import_cycle (error),
-      export_options, export_options_default (error), start, start.flip, start-return,
-      start3, names, renamings, memory_data, table_elem, fusing, global-ordering.
-- [ ] New tests beyond binaryen's: single-module identity merge, >3 modules, stdin/stdout
-      behaviour, malformed input errors, duplicate module names.
+- [x] Library API: `Merger::new(options).add_module(name, bytes)?…merge() -> Vec<u8>`;
+      `MergeOptions { export_conflicts: Error|Rename|Skip, features, validate }`.
+- [x] Collect pass (`src/parse.rs`), import resolution with transitive chasing + cycle
+      error (`src/resolve.rs`), per-kind remap tables; surviving imports first in each
+      index space; fused imports dropped from the output (binaryen reaches the same end
+      state via its unconditional remove-unused-module-elements pass — we do NOT run
+      general DCE; that divergence is deliberate for now, revisit in phase 5).
+- [x] Emit pass (`src/emit.rs`) via a `Reencode` impl carrying remap tables
+      (`src/remap.rs`); types/rec groups copied verbatim without dedup; start fusion
+      (synthetic combined start); export conflict policies (error / rename `_N` / skip);
+      output validation.
+- [x] Global reordering (stable topological sort of init-expr dependencies).
+- [x] Fused import/export compatibility checks (`src/check.rs`) with wasm-merge-style
+      aggregated "type mismatch when importing …" errors; function subtyping and
+      immutable-global subtyping over *abstract* heap types (concrete heap types are
+      skipped until phase 3 type canonicalisation — output validation still catches
+      those). NB: like wasm-merge, inputs are never validated individually — only the
+      merged output is (an input may only become valid once merged, e.g. ref.func of an
+      import fused to an exported definition).
+- [x] CLI: positional pairs, `-o` (`-` = stdout), `-S`, `--rename-export-conflicts`,
+      `--skip-export-conflicts`, `-n`, `--all-features`/`--mvp-features`, plus argv
+      translation for binaryen's single-dash spellings (`-rec`, `-sec`, `-all`, `-mvp`).
+- [x] Binaryen fixtures vendored (`tests/fixtures/binaryen/merge/`, CHECK comments
+      stripped, legacy-EH syntax in renamings adapted to try_table — see NOTICE);
+      `tests/binaryen_suite.rs` runs 21 ported scenarios via `std::process::Command`
+      with snapbox snapshots (`tests/snapshots/`, bless with `SNAPSHOTS=overwrite`).
+- [x] New tests beyond binaryen's (`tests/cli.rs`): single-module identity merge,
+      5-module fusing chain, binary/text mixed inputs, binary stdout/file output,
+      duplicate module names, unresolved imports preserved, `-n` skipping checks,
+      missing-file diagnostics.
 
 ### Phase 2 — Validation & feature-flag parity
 - [ ] Import/export compatibility checks with binaryen-style messages (`types.wat`):
@@ -123,26 +140,32 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 
 | Fixture | Covers | Status |
 |---|---|---|
-| chain.wat | re-export chains across 3 modules | pending |
-| cycle.wat | circular imports via internalisation | pending |
-| import_cycle.wat | infinite import loop → error | pending |
-| export_options.wat | `-rec` / `-sec` | pending |
-| export_options_default.wat | conflict → error | pending |
-| fusing.wat | import/export fusing (funcs, memories, tags) | pending |
-| names.wat / renamings.wat | renaming across all item kinds | pending |
-| memory_data.wat | memory + data segment remapping | pending |
-| table_elem.wat | table + element segment remapping | pending |
-| global-ordering.wat | global initialiser reordering | pending |
-| start.wat / start.flip.wat / start-return.wat / start3.wat | start fusion | pending |
-| types.wat | import/export type mismatch errors | pending |
-| func_subtyping.wat / func_subtyping_return.wat | function subtyping (GC) | pending |
-| global_subtyping.wat | global subtyping (GC) | pending |
-| table64.wat | 64-bit tables | pending |
-| sourcemap.wat | source map preservation | pending |
-| annotations.wat / annotations-func-only.wat | branch hints / annotations | pending |
-| manifest.wat | `--output-manifest` | pending |
+| chain.wat | re-export chains across 3 modules | ✅ ported |
+| cycle.wat | circular imports via internalisation | ✅ ported |
+| import_cycle.wat | infinite import loop → error | ✅ ported (we name the import field at the cycle, binaryen the internal item) |
+| export_options.wat | `-rec` / `-sec` | ✅ ported (both variants) |
+| export_options_default.wat | conflict → error | ✅ ported |
+| fusing.wat | import/export fusing (funcs, memories, tags) | ✅ ported |
+| names.wat / renamings.wat | renaming across all item kinds | ✅ ported (names without `-g` → phase 4; renamings' legacy EH adapted to try_table) |
+| memory_data.wat | memory + data segment remapping | ✅ ported |
+| table_elem.wat | table + element segment remapping | ✅ ported |
+| global-ordering.wat | global initialiser reordering | ✅ ported |
+| start.wat / start.flip.wat / start-return.wat / start3.wat | start fusion | ✅ ported |
+| types.wat | import/export type mismatch errors | ✅ ported (all 17 mismatches reported, matching binaryen's list) |
+| func_subtyping.wat / func_subtyping_return.wat | function subtyping (GC) | ✅ ported (concrete-type checks via output validation until phase 3) |
+| global_subtyping.wat | global subtyping (GC) | ✅ ported (ditto) |
+| table64.wat | 64-bit tables | ✅ ported |
+| sourcemap.wat | source map preservation | ⏳ phase 4 (ignored test in place) |
+| annotations.wat / annotations-func-only.wat | branch hints / annotations | ⏳ phase 4 (ignored test in place) |
+| manifest.wat | `--output-manifest` | ⏳ phase 5 (ignored test in place) |
 
 ## Log
 
 - 2026-06-09: research complete (wasm-merge semantics, test inventory, wasm-tools 0.251.x,
   battery packs); plan written; Phase 0 begun.
+- 2026-06-09: Phase 0 complete (scaffold, CI, docs, licences). Phase 1 complete: merge
+  engine (parse → resolve → check → emit over wasm-encoder's Reencode), CLI, 21 binaryen
+  scenarios ported and passing + 12 CLI behaviour tests. Key findings recorded:
+  wasm-merge validates output only (not inputs); it runs reorder-globals-always and full
+  remove-unused-module-elements after merging (we drop fused imports but run no general
+  DCE); binaryen's text parser accepts legacy EH syntax the wat crate doesn't.
