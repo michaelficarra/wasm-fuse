@@ -241,3 +241,8 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
   mismatch diagnostics, cross-module subtype-chain satisfaction. Types unused after
   pruning are still emitted — noted as a refinement. Next: phase 4 (names section,
   source maps, annotations).
+- 2026-06-09: Phase 4 complete across three commits — name-section merging
+  (-g/--keep-names), branch-hint preservation (with the per-instruction offset
+  infrastructure), and source maps (--source-map NAME=PATH, --output-source-map,
+  --source-map-url; library: add_source_map + merge_full + source_map_url option).
+  Remaining wasm-merge capability gap: --output-manifest only (phase 5).
