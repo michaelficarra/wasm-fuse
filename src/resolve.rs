@@ -303,12 +303,11 @@ fn order_globals(
                     name: parsed[module_idx].name.clone(),
                     source,
                 })?;
-            if let Operator::GlobalGet { global_index } = operator {
-                if let Site::Def { module, def_index } =
+            if let Operator::GlobalGet { global_index } = operator
+                && let Site::Def { module, def_index } =
                     resolution.resolve(Kind::Global, module_idx, global_index)?
-                {
-                    dependencies[position].push(node_position[&(module, def_index)]);
-                }
+            {
+                dependencies[position].push(node_position[&(module, def_index)]);
             }
         }
     }

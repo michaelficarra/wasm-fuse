@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Merge multiple WebAssembly modules into one — a Rust counterpart to binaryen's wasm-merge"
 license = "MIT OR Apache-2.0"
-rust-version = "1.85.0"
+# Floor set by human-panic 2.0.6+ (via sysinfo); revisit if a library
+# consumer ever needs an older toolchain.
+rust-version = "1.88.0"
 repository = "https://github.com/michaelficarra/wasm-bundle"
 keywords = ["wasm", "webassembly", "merge", "bundler", "linker"]
 categories = ["wasm", "command-line-utilities", "development-tools"]

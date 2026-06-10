@@ -215,10 +215,10 @@ fn source_map_url_is_embedded() {
     let merged = std::fs::read(&out).unwrap();
     let mut found = None;
     for payload in Parser::new(0).parse_all(&merged) {
-        if let Payload::CustomSection(section) = payload.unwrap() {
-            if section.name() == "sourceMappingURL" {
-                found = Some(section.data().to_vec());
-            }
+        if let Payload::CustomSection(section) = payload.unwrap()
+            && section.name() == "sourceMappingURL"
+        {
+            found = Some(section.data().to_vec());
         }
     }
     let data = found.expect("missing sourceMappingURL section");
