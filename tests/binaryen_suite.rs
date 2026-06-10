@@ -1,8 +1,11 @@
 //! Scenarios ported from binaryen's wasm-merge test suite
 //! (`test/lit/merge/`, vendored under `tests/fixtures/binaryen/merge/`; see
-//! NOTICE). Each test mirrors the original `RUN:` line's modules and flags,
-//! exercising the CLI exactly as wasm-merge would be invoked — including
-//! binaryen's single-dash flag spellings.
+//! NOTICE). Each test uses the original `RUN:` line's modules, with its flags
+//! translated to wasm-bundle's own interface (the CLI deliberately does not
+//! copy wasm-merge's flags): `--rename-export-conflicts` →
+//! `--export-conflicts rename`, `--skip-export-conflicts` →
+//! `--export-conflicts skip`, `-S` → `--text`, and `-all` → nothing, since
+//! wasm-bundle always accepts every proposal.
 //!
 //! The original tests assert binaryen's printed output via FileCheck; our
 //! text output comes from wasmprinter and is formatted (and numbered)
@@ -27,14 +30,18 @@ fn fixture(name: &str) -> PathBuf {
 fn merge(modules: &[(&str, &str)], flags: &[&str]) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_wasm-bundle"));
     for (file, name) in modules {
-        command.arg(fixture(file)).arg(name);
+        command.arg(format!("{name}={}", fixture(file).display()));
     }
     command.args(flags).output().unwrap()
 }
 
-/// Merge and return the textual (`-S`) form of the merged module.
+/// Merge and return the textual (`--text`) form of the merged module.
 fn merge_to_text(modules: &[(&str, &str)], flags: &[&str]) -> String {
-    let flags: Vec<&str> = flags.iter().chain(&["-S", "-o", "-"]).copied().collect();
+    let flags: Vec<&str> = flags
+        .iter()
+        .chain(&["--text", "-o", "-"])
+        .copied()
+        .collect();
     let output = merge(modules, &flags);
     assert!(
         output.status.success(),
@@ -64,7 +71,7 @@ fn chain() {
             ("chain.wat.second", "second"),
             ("chain.wat.third", "third"),
         ],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/chain.wat"]);
 }
@@ -78,7 +85,7 @@ fn cycle() {
             ("cycle.wat.second", "second"),
             ("cycle.wat.third", "third"),
         ],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/cycle.wat"]);
 }
@@ -109,7 +116,7 @@ fn export_options_rename() {
             ("export_options.wat", "first"),
             ("export_options.wat.second", "second"),
         ],
-        &["--rename-export-conflicts"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/export_options.rename.wat"]);
 }
@@ -121,7 +128,7 @@ fn export_options_skip() {
             ("export_options.wat", "first"),
             ("export_options.wat.second", "second"),
         ],
-        &["--skip-export-conflicts"],
+        &["--export-conflicts=skip"],
     );
     assert_data_eq!(text, file!["snapshots/export_options.skip.wat"]);
 }
@@ -146,7 +153,7 @@ fn fusing() {
     // Imports fuse to exports across modules: functions, memories, and tags.
     let text = merge_to_text(
         &[("fusing.wat", "first"), ("fusing.wat.second", "second")],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/fusing.wat"]);
 }
@@ -161,7 +168,7 @@ fn global_ordering() {
             ("global-ordering.wat", "first"),
             ("global-ordering.wat.second", "second"),
         ],
-        &["-all"],
+        &[],
     );
     assert_data_eq!(text, file!["snapshots/global-ordering.wat"]);
 }
@@ -173,7 +180,7 @@ fn memory_data() {
             ("memory_data.wat", "first"),
             ("memory_data.wat.second", "second"),
         ],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/memory_data.wat"]);
 }
@@ -185,7 +192,7 @@ fn names() {
     // GC types, duplicate names, unnamed items — must still work.
     let text = merge_to_text(
         &[("names.wat", "first"), ("names.wat.second", "second")],
-        &["-all"],
+        &[],
     );
     assert_data_eq!(text, file!["snapshots/names.wat"]);
 }
@@ -199,7 +206,7 @@ fn renamings() {
             ("renamings.wat", "first"),
             ("renamings.wat.second", "second"),
         ],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/renamings.wat"]);
 }
@@ -210,7 +217,7 @@ fn start() {
     // second has a real start function.
     let text = merge_to_text(
         &[("start.wat", "first"), ("start.wat.second", "second")],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/start.wat"]);
 }
@@ -223,7 +230,7 @@ fn start_flip() {
             ("start.flip.wat", "first"),
             ("start.flip.wat.second", "second"),
         ],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/start.flip.wat"]);
 }
@@ -237,7 +244,7 @@ fn start_return() {
             ("start-return.wat", "first"),
             ("start-return.wat.second", "second"),
         ],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/start-return.wat"]);
 }
@@ -251,7 +258,7 @@ fn start3() {
             ("start3.wat.second", "second"),
             ("start3.wat.third", "third"),
         ],
-        &["-all"],
+        &[],
     );
     assert_data_eq!(text, file!["snapshots/start3.wat"]);
 }
@@ -264,7 +271,7 @@ fn table_elem() {
             ("table_elem.wat", "first"),
             ("table_elem.wat.second", "second"),
         ],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/table_elem.wat"]);
 }
@@ -273,7 +280,7 @@ fn table_elem() {
 fn table64() {
     let text = merge_to_text(
         &[("table64.wat", "first"), ("table64.wat.second", "second")],
-        &["--rename-export-conflicts", "-all"],
+        &["--export-conflicts=rename"],
     );
     assert_data_eq!(text, file!["snapshots/table64.wat"]);
 }
@@ -287,7 +294,7 @@ fn func_subtyping() {
             ("func_subtyping.wat", "primary"),
             ("func_subtyping.wat.second", "secondary"),
         ],
-        &["--skip-export-conflicts", "-all"],
+        &["--export-conflicts=skip"],
     );
     assert_data_eq!(text, file!["snapshots/func_subtyping.wat"]);
 }
@@ -299,7 +306,7 @@ fn func_subtyping_return() {
             ("func_subtyping_return.wat", "primary"),
             ("func_subtyping_return.wat.second", "secondary"),
         ],
-        &["--skip-export-conflicts", "-all"],
+        &["--export-conflicts=skip"],
     );
     assert_data_eq!(text, file!["snapshots/func_subtyping_return.wat"]);
 }
@@ -311,7 +318,7 @@ fn global_subtyping() {
             ("global_subtyping.wat", "primary"),
             ("global_subtyping.wat.second", "secondary"),
         ],
-        &["--skip-export-conflicts", "-all"],
+        &["--export-conflicts=skip"],
     );
     assert_data_eq!(text, file!["snapshots/global_subtyping.wat"]);
 }
@@ -321,7 +328,7 @@ fn types_mismatches_are_all_reported() {
     // A single module named env importing from itself, with deliberately
     // mismatched function/table/memory/global/tag imports. All mismatches
     // are reported at once.
-    let stderr = merge_failure(&[("types.wat", "env")], &["-all"]);
+    let stderr = merge_failure(&[("types.wat", "env")], &[]);
     for expected in [
         "import/export mismatches",
         "type mismatch when importing function f1 from module env",

@@ -8,6 +8,12 @@
 //! replaces runtime module loading with build-time linking. Imports referring
 //! to modules outside the input set are left as imports.
 //!
+//! The merged module's exports are chosen by [`ExportSelection`]: either the
+//! union of every input's exports (with a configurable
+//! [`ExportConflictPolicy`] for name clashes — what wasm-merge produces), or
+//! only the exports of one designated entry-point module, with the other
+//! modules serving solely to satisfy (some of) its imports.
+//!
 //! # Example
 //!
 //! ```
@@ -34,4 +40,4 @@ mod parse;
 mod remap;
 mod resolve;
 
-pub use merge::{ExportConflictPolicy, MergeError, MergeOptions, Merger};
+pub use merge::{ExportConflictPolicy, ExportSelection, MergeError, MergeOptions, Merger};

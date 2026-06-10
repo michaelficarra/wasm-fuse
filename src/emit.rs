@@ -10,7 +10,7 @@ use wasm_encoder::{
     StartSection, TableSection, TagSection, TypeSection,
 };
 
-use crate::merge::{ExportConflictPolicy, MergeError, MergeOptions};
+use crate::merge::{ExportConflictPolicy, ExportSelection, MergeError, MergeOptions};
 use crate::parse::{Kind, ParsedModule};
 use crate::remap::{Remapper, flatten_error};
 use crate::resolve::Layout;
@@ -152,40 +152,62 @@ pub(crate) fn emit(
     }
 
     let mut exports = ExportSection::new();
-    let mut export_names: HashSet<String> = HashSet::new();
-    for (module_idx, input) in parsed.iter().enumerate() {
-        for export in &input.exports {
-            let kind = Kind::of_export(export.kind);
-            let name = if export_names.contains(export.name) {
-                match options.export_conflicts {
-                    ExportConflictPolicy::Error => {
-                        return Err(MergeError::ExportConflict {
-                            name: export.name.to_string(),
-                        });
-                    }
-                    ExportConflictPolicy::Skip => continue,
-                    ExportConflictPolicy::Rename => {
-                        // Probe name_1, name_2, ... like binaryen's
-                        // Names::getValidExportName.
-                        let mut suffix = 1u32;
-                        loop {
-                            let candidate = format!("{}_{suffix}", export.name);
-                            if !export_names.contains(&candidate) {
-                                break candidate;
+    match &options.exports {
+        // Only the entry-point module's exports survive; its imports were
+        // satisfied (where possible) by the other modules during resolution.
+        // Export names within one module are already unique, so no conflict
+        // handling is needed.
+        ExportSelection::Entry(entry) => {
+            let module_idx = parsed
+                .iter()
+                .position(|module| module.name == *entry)
+                .expect("entry module existence is checked before emission");
+            for export in &parsed[module_idx].exports {
+                let kind = Kind::of_export(export.kind);
+                let index = layout.remaps[module_idx].kind(kind)[export.index as usize];
+                let export_kind = remapper(module_idx)
+                    .export_kind(export.kind)
+                    .map_err(in_module(module_idx))?;
+                exports.export(export.name, export_kind, index);
+            }
+        }
+        ExportSelection::Union(conflict_policy) => {
+            let mut export_names: HashSet<String> = HashSet::new();
+            for (module_idx, input) in parsed.iter().enumerate() {
+                for export in &input.exports {
+                    let kind = Kind::of_export(export.kind);
+                    let name = if export_names.contains(export.name) {
+                        match conflict_policy {
+                            ExportConflictPolicy::Error => {
+                                return Err(MergeError::ExportConflict {
+                                    name: export.name.to_string(),
+                                });
                             }
-                            suffix += 1;
+                            ExportConflictPolicy::Skip => continue,
+                            ExportConflictPolicy::Rename => {
+                                // Probe name_1, name_2, ... like binaryen's
+                                // Names::getValidExportName.
+                                let mut suffix = 1u32;
+                                loop {
+                                    let candidate = format!("{}_{suffix}", export.name);
+                                    if !export_names.contains(&candidate) {
+                                        break candidate;
+                                    }
+                                    suffix += 1;
+                                }
+                            }
                         }
-                    }
+                    } else {
+                        export.name.to_string()
+                    };
+                    let index = layout.remaps[module_idx].kind(kind)[export.index as usize];
+                    let export_kind = remapper(module_idx)
+                        .export_kind(export.kind)
+                        .map_err(in_module(module_idx))?;
+                    exports.export(&name, export_kind, index);
+                    export_names.insert(name);
                 }
-            } else {
-                export.name.to_string()
-            };
-            let index = layout.remaps[module_idx].kind(kind)[export.index as usize];
-            let export_kind = remapper(module_idx)
-                .export_kind(export.kind)
-                .map_err(in_module(module_idx))?;
-            exports.export(&name, export_kind, index);
-            export_names.insert(name);
+            }
         }
     }
     if !exports.is_empty() {

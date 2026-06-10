@@ -5,7 +5,8 @@ use wasmparser::WasmFeatures;
 
 use crate::{check, emit, parse, resolve};
 
-/// What to do when two input modules export the same name.
+/// What to do when two input modules export the same name (in
+/// [`ExportSelection::Union`] mode).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExportConflictPolicy {
     /// Report an error and abort the merge (wasm-merge's default).
@@ -19,11 +20,29 @@ pub enum ExportConflictPolicy {
     Skip,
 }
 
+/// Which exports the merged module keeps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExportSelection {
+    /// Export everything every input module exports, resolving name conflicts
+    /// according to the [`ExportConflictPolicy`]. This is what wasm-merge
+    /// does.
+    Union(ExportConflictPolicy),
+    /// Export only the exports of the named entry-point module; the other
+    /// modules are only used to (partially or fully) satisfy its imports.
+    Entry(String),
+}
+
+impl Default for ExportSelection {
+    fn default() -> Self {
+        ExportSelection::Union(ExportConflictPolicy::default())
+    }
+}
+
 /// Options controlling a [`Merger`].
 #[derive(Clone, Debug)]
 pub struct MergeOptions {
-    /// How to handle export name conflicts between input modules.
-    pub export_conflicts: ExportConflictPolicy,
+    /// Which exports the merged module keeps.
+    pub exports: ExportSelection,
     /// WebAssembly proposals accepted in the inputs and used to validate the
     /// output.
     pub features: WasmFeatures,
@@ -36,7 +55,7 @@ pub struct MergeOptions {
 impl Default for MergeOptions {
     fn default() -> Self {
         MergeOptions {
-            export_conflicts: ExportConflictPolicy::default(),
+            exports: ExportSelection::default(),
             features: WasmFeatures::default(),
             validate: true,
         }
@@ -78,6 +97,13 @@ pub enum MergeError {
     )]
     ExportConflict {
         /// The conflicting export name.
+        name: String,
+    },
+    /// The module named by [`ExportSelection::Entry`] is not among the
+    /// inputs.
+    #[error("entry module {name:?} is not among the input modules")]
+    UnknownEntryModule {
+        /// The entry module name that was not found.
         name: String,
     },
     /// A chain of imports re-exporting other imports never reaches a
@@ -176,6 +202,12 @@ impl Merger {
             .iter()
             .map(|input| parse::parse_module(&input.name, &input.binary))
             .collect::<Result<Vec<_>, _>>()?;
+
+        if let ExportSelection::Entry(name) = &self.options.exports {
+            if !parsed.iter().any(|module| module.name == *name) {
+                return Err(MergeError::UnknownEntryModule { name: name.clone() });
+            }
+        }
 
         let mut resolution = resolve::Resolution::new(&parsed);
         let layout = resolve::layout(&parsed, &mut resolution)?;

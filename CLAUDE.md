@@ -23,12 +23,17 @@ the parity table and log).
   (Apache-2.0; see NOTICE). Do not edit vendored fixtures; add new cases as separate
   files.
 
-## CLI compatibility
+## CLI design
 
-Flag names mirror binaryen's wasm-merge. binaryen spells some long options with a
-single dash (`-rec`, `-sec`, `-all`, `-mvp`); `translate_binaryen_flags` in
-`src/main.rs` maps those to clap-style `--` flags — extend it when adding flags that
-exist in wasm-merge.
+The CLI deliberately does NOT copy wasm-merge's flags (owner's decision): parity
+with wasm-merge is at the capability level only. Follow clap best practices
+instead. Current shape: `[NAME=]PATH` positionals (name defaults to the file
+stem), `-o/--output`, `-t/--text`, `--entry NAME` (export only that module's
+exports), `--export-conflicts <error|rename|skip>` (union mode only; clap-level
+conflict with `--entry`), `--no-validate`. There are intentionally NO
+wasm-feature toggles: the CLI always accepts/validates with all proposals
+enabled; fine-grained `WasmFeatures` is exposed only through the library's
+`MergeOptions`.
 
 ## Validation (run before every commit)
 

@@ -1,6 +1,6 @@
 # wasm-bundle
 
-[![CI](https://github.com/OWNER/wasm-bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/wasm-bundle/actions/workflows/ci.yml)
+[![CI](https://github.com/michaelficarra/wasm-bundle/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelficarra/wasm-bundle/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/wasm-bundle.svg)](https://crates.io/crates/wasm-bundle)
 [![docs.rs](https://docs.rs/wasm-bundle/badge.svg)](https://docs.rs/wasm-bundle)
 
@@ -9,12 +9,16 @@ Merge multiple WebAssembly core modules into a single module — a Rust counterp
 Bytecode Alliance [wasm-tools](https://github.com/bytecodealliance/wasm-tools) crates
 and usable both as a library and as a CLI.
 
-Each input module is given a name. Imports in any module of the form
-`(import "NAME" "item" …)`, where `NAME` is the name of another input module, are
-resolved at merge time to the item that module exports as `item` — the way a
-JavaScript bundler replaces runtime module loading with build-time linking. Imports
-referring to modules outside the input set are left as imports, and circular
+Each input module has a name (defaulting to its file stem). Imports in any module of
+the form `(import "NAME" "item" …)`, where `NAME` is the name of another input
+module, are resolved at merge time to the item that module exports as `item` — the
+way a JavaScript bundler replaces runtime module loading with build-time linking.
+Imports referring to modules outside the input set are left as imports, and circular
 references between input modules are supported.
+
+The merged module's exports can be either the **union** of every input's exports
+(what `wasm-merge` produces) or, with `--entry`, just the **entry-point module's**
+exports — the other modules then only serve to satisfy (some of) its imports.
 
 > **Status**: under active development towards full `wasm-merge` parity; see
 > [PLAN.md](PLAN.md) for the roadmap and current parity checklist.
@@ -30,23 +34,28 @@ Or from a checkout: `cargo install --path .`
 ### CLI usage
 
 ```sh
-# Merge two modules. Imports like (import "env" "foo" ...) in app.wasm are
-# resolved against the exports of env.wasm.
-wasm-bundle app.wasm app env.wasm env -o merged.wasm
+# Merge two modules. Module names default to file stems, so imports like
+# (import "env" "foo" ...) in app.wasm resolve against env.wasm's exports.
+wasm-bundle app.wasm env.wasm -o merged.wasm
 
-# Inputs may be WebAssembly text; output as text with -S
-wasm-bundle first.wat first second.wat second -S -o merged.wat
+# Name a module explicitly with NAME=PATH
+wasm-bundle app.wasm libc=wasi-libc.wasm -o merged.wasm
 
-# Resolve export-name conflicts by renaming (appends _1, _2, ...)
-wasm-bundle a.wasm a b.wasm b --rename-export-conflicts -o out.wasm
+# Inputs may be WebAssembly text; --text/-t emits text output
+wasm-bundle first.wat second.wat --text -o merged.wat
 
-# ... or by keeping the first export and skipping later ones
-wasm-bundle a.wasm a b.wasm b --skip-export-conflicts -o out.wasm
+# Keep only app's exports; lib.wasm just satisfies app's imports
+wasm-bundle app.wasm lib.wasm --entry app -o merged.wasm
+
+# When unioning exports, pick a conflict policy: error (default),
+# rename (appends _1, _2, ...), or skip (first export wins)
+wasm-bundle a.wasm b.wasm --export-conflicts rename -o out.wasm
 ```
 
-Flag names mirror `wasm-merge`, and binaryen's single-dash spellings (`-rec`,
-`-sec`, `-all`, `-mvp`) are accepted, so existing `wasm-merge` invocations
-translate directly. See `wasm-bundle --help` for everything.
+All WebAssembly proposals are accepted in inputs and used when validating the
+output; there are no feature flags to manage. `wasm-bundle` matches
+`wasm-merge`'s capabilities but deliberately not its CLI; see
+`wasm-bundle --help` for everything.
 
 ## Use as a library
 
@@ -57,9 +66,13 @@ cargo add wasm-bundle --no-default-features
 (`--no-default-features` drops the CLI-only dependencies.)
 
 ```rust
-use wasm_bundle::{MergeOptions, Merger};
+use wasm_bundle::{ExportSelection, MergeOptions, Merger};
 
-let mut merger = Merger::new(MergeOptions::default());
+let mut merger = Merger::new(MergeOptions {
+    // or ExportSelection::Union(..) to keep every module's exports
+    exports: ExportSelection::Entry("application".to_string()),
+    ..MergeOptions::default()
+});
 merger.add_module("library", &std::fs::read("library.wasm")?)?;
 merger.add_module("application", &std::fs::read("application.wasm")?)?;
 let merged: Vec<u8> = merger.merge()?;

@@ -5,8 +5,7 @@ edition = "2024"
 description = "Merge multiple WebAssembly modules into one — a Rust counterpart to binaryen's wasm-merge"
 license = "MIT OR Apache-2.0"
 rust-version = "1.85.0"
-# TODO: set the real repository URL before publishing
-repository = "https://github.com/OWNER/wasm-bundle"
+repository = "https://github.com/michaelficarra/wasm-bundle"
 keywords = ["wasm", "webassembly", "merge", "bundler", "linker"]
 categories = ["wasm", "command-line-utilities", "development-tools"]
 

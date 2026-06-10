@@ -49,8 +49,15 @@ Dependency management follows community battery packs via [`cargo-bp`](https://c
 - **Validation**: `wasmparser::Validator` with configurable `WasmFeatures`, on by default.
 - **Text output**: `wasmprinter` for `-S`. Note our text formatting differs from binaryen's,
   so ported tests assert semantic properties / our own snapshots, not binaryen CHECK lines.
-- **CLI**: clap (derive), flag names mirror wasm-merge so existing invocations translate
-  directly.
+- **CLI**: clap (derive), deliberately NOT flag-compatible with wasm-merge (owner's
+  decision; capability parity only): `[NAME=]PATH` inputs with stem-derived default
+  names, `--entry`, `--export-conflicts <error|rename|skip>`, `-t/--text`,
+  `--no-validate`, and intentionally no wasm-feature toggles (the CLI always runs
+  with all proposals enabled; `WasmFeatures` remains a library-level option).
+- **Export selection** (extension beyond wasm-merge): `ExportSelection::Union(policy)`
+  unions every module's exports like wasm-merge; `ExportSelection::Entry(name)` keeps
+  only the entry-point module's exports, the other modules serving solely to satisfy
+  (some of) its imports.
 - **Testing**: binaryen's `test/lit/merge` inputs are vendored under
   `tests/fixtures/binaryen/` (Apache-2.0, with NOTICE); integration tests drive the real
   binary via `std::process::Command` + `env!("CARGO_BIN_EXE_wasm-bundle")`; snapshot tests
@@ -97,9 +104,8 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       those). NB: like wasm-merge, inputs are never validated individually — only the
       merged output is (an input may only become valid once merged, e.g. ref.func of an
       import fused to an exported definition).
-- [x] CLI: positional pairs, `-o` (`-` = stdout), `-S`, `--rename-export-conflicts`,
-      `--skip-export-conflicts`, `-n`, `--all-features`/`--mvp-features`, plus argv
-      translation for binaryen's single-dash spellings (`-rec`, `-sec`, `-all`, `-mvp`).
+- [x] CLI: initially mirrored wasm-merge's flags; redesigned same day to wasm-bundle's
+      own best-practice interface (see Architecture decisions) at the owner's direction.
 - [x] Binaryen fixtures vendored (`tests/fixtures/binaryen/merge/`, CHECK comments
       stripped, legacy-EH syntax in renamings adapted to try_table — see NOTICE);
       `tests/binaryen_suite.rs` runs 21 ported scenarios via `std::process::Command`
@@ -109,13 +115,14 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
       duplicate module names, unresolved imports preserved, `-n` skipping checks,
       missing-file diagnostics.
 
-### Phase 2 — Validation & feature-flag parity
-- [ ] Import/export compatibility checks with binaryen-style messages (`types.wat`):
-      function types, global mutability + type, table/memory limits + index type, tags.
-- [ ] Full feature-flag surface: `--enable-*`/`--disable-*`, `-all`, `-mvp` mapped to
-      `WasmFeatures`; multi-memory output paths.
-- [ ] Tags/exception-handling merging end to end.
-- [ ] `--quiet`, `--version`, help text polish.
+### Phase 2 — Remaining semantics parity
+- [x] Import/export compatibility checks with binaryen-style messages (`types.wat`) —
+      landed early, in phase 1.
+- [x] Tags/exception-handling merging (covered by fusing/renamings fixtures).
+- [ ] Decide on and (if adopted) implement binaryen's remove-unused-module-elements
+      equivalent (reachability DCE from exports/start/segments), possibly opt-in.
+- ~~Feature-flag surface~~ — dropped deliberately: the CLI has no wasm-feature
+      toggles (always all proposals); `WasmFeatures` stays a library option.
 
 ### Phase 3 — GC, subtyping, 64-bit
 - [ ] Rec-group copying with cross-module type deduplication/canonicalisation.
@@ -169,3 +176,8 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
   wasm-merge validates output only (not inputs); it runs reorder-globals-always and full
   remove-unused-module-elements after merging (we drop fused imports but run no general
   DCE); binaryen's text parser accepts legacy EH syntax the wat crate doesn't.
+- 2026-06-09: CLI redesigned away from wasm-merge mirroring at the owner's direction
+  (`[NAME=]PATH` inputs, `--export-conflicts`, `-t/--text`, `--no-validate`, no feature
+  toggles). Added export selection modes: union (wasm-merge behaviour) vs `--entry NAME`
+  / `ExportSelection::Entry` (only the entry module's exports; other modules just
+  satisfy its imports). GitHub remote added; CI running upstream.

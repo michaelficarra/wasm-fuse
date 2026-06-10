@@ -1,56 +1,59 @@
-use std::ffi::OsString;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anstream::eprintln;
 use anstyle::AnsiColor;
-use clap::Parser;
-use wasm_bundle::{ExportConflictPolicy, MergeOptions, Merger};
+use clap::{Parser, ValueEnum};
+use wasm_bundle::{ExportConflictPolicy, ExportSelection, MergeOptions, Merger};
 use wasmparser::WasmFeatures;
 
 /// Merge multiple WebAssembly modules into one.
 ///
-/// Each input module is given a name, and imports of the form
-/// `(import "NAME" "item" ...)` referring to another input module are resolved
-/// to that module's exports at merge time. Imports of modules outside the
-/// input set are left as imports.
+/// Each input module has a name (defaulting to its file stem), and imports of
+/// the form `(import "NAME" "item" ...)` referring to another input module are
+/// resolved to that module's exports at merge time. Imports of modules outside
+/// the input set are left as imports.
 #[derive(Parser)]
 #[command(version, about, name = "wasm-bundle")]
 struct Cli {
-    /// Alternating module file and module name pairs: INFILE1 NAME1 INFILE2 NAME2 ...
+    /// Input modules, as PATH or NAME=PATH
     ///
-    /// Files may be binary (.wasm) or text (.wat).
-    #[arg(value_name = "INFILE NAME", required = true)]
-    inputs: Vec<String>,
+    /// The module name defaults to the file stem (`lib.wasm` is module
+    /// `lib`); it is what other modules' imports refer to. Files may be
+    /// binary (.wasm) or text (.wat).
+    #[arg(value_name = "[NAME=]PATH", required = true)]
+    modules: Vec<String>,
 
-    /// Output file (use `-` for stdout)
-    #[arg(short, long, default_value = "-", value_name = "FILE")]
+    /// Output file (defaults to stdout)
+    #[arg(short, long, value_name = "PATH", default_value = "-")]
     output: PathBuf,
 
     /// Emit WebAssembly text instead of binary
-    #[arg(short = 'S', long)]
-    emit_text: bool,
+    #[arg(short, long)]
+    text: bool,
 
-    /// Rename exports to resolve conflicts between modules (appends _1, _2, ...)
-    #[arg(long, conflicts_with = "skip_export_conflicts")]
-    rename_export_conflicts: bool,
+    /// Export only this module's exports
+    ///
+    /// The other modules are only used to satisfy (some of) its imports.
+    /// Without this option, the merged module exports everything every input
+    /// module exports.
+    #[arg(long, value_name = "NAME")]
+    entry: Option<String>,
 
-    /// Keep the first conflicting export and skip later ones
+    /// How to resolve export name conflicts between modules
+    #[arg(
+        long,
+        value_enum,
+        value_name = "POLICY",
+        default_value_t = ConflictPolicy::Error,
+        conflicts_with = "entry"
+    )]
+    export_conflicts: ConflictPolicy,
+
+    /// Skip output validation and import/export compatibility checking
     #[arg(long)]
-    skip_export_conflicts: bool,
-
-    /// Skip validation of the merged output
-    #[arg(short = 'n', long)]
-    no_validation: bool,
-
-    /// Enable all WebAssembly proposals
-    #[arg(long, conflicts_with = "mvp_features")]
-    all_features: bool,
-
-    /// Disable all WebAssembly proposals beyond the original MVP
-    #[arg(long)]
-    mvp_features: bool,
+    no_validate: bool,
 
     #[command(flatten)]
     color: colorchoice_clap::Color,
@@ -60,23 +63,20 @@ struct Cli {
     verbose: bool,
 }
 
-/// binaryen's tools accept single-dash long options; translate the wasm-merge
-/// spellings into their clap equivalents so existing invocations keep working.
-fn translate_binaryen_flags(args: impl Iterator<Item = OsString>) -> Vec<OsString> {
-    args.map(|arg| match arg.to_str() {
-        Some("-rec") => OsString::from("--rename-export-conflicts"),
-        Some("-sec") => OsString::from("--skip-export-conflicts"),
-        Some("-all") => OsString::from("--all-features"),
-        Some("-mvp") => OsString::from("--mvp-features"),
-        _ => arg,
-    })
-    .collect()
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ConflictPolicy {
+    /// Fail the merge when two modules export the same name
+    Error,
+    /// Keep the first export and rename later ones (name_1, name_2, ...)
+    Rename,
+    /// Keep the first export and drop later conflicting ones
+    Skip,
 }
 
 fn main() -> ExitCode {
     human_panic::setup_panic!();
 
-    let cli = Cli::parse_from(translate_binaryen_flags(wild::args_os()));
+    let cli = Cli::parse_from(wild::args_os());
 
     cli.color.write_global();
 
@@ -99,46 +99,50 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli) -> anyhow::Result<()> {
-    if cli.inputs.len() % 2 != 0 {
-        anyhow::bail!(
-            "inputs must be given as alternating INFILE NAME pairs, \
-             but {} arguments were provided",
-            cli.inputs.len()
+/// Split a `NAME=PATH` argument, deriving the name from the file stem when no
+/// explicit name is given.
+fn parse_module_argument(argument: &str) -> anyhow::Result<(String, PathBuf)> {
+    if let Some((name, path)) = argument.split_once('=') {
+        anyhow::ensure!(
+            !name.is_empty(),
+            "empty module name in {argument:?}; use NAME=PATH"
         );
+        return Ok((name.to_string(), PathBuf::from(path)));
     }
-
-    let features = if cli.all_features {
-        WasmFeatures::all()
-    } else if cli.mvp_features {
-        WasmFeatures::WASM1
-    } else {
-        WasmFeatures::default()
+    let path = PathBuf::from(argument);
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        anyhow::bail!("cannot derive a module name from {argument:?}; use NAME=PATH");
     };
+    Ok((stem.to_string(), path))
+}
 
+fn run(cli: &Cli) -> anyhow::Result<()> {
     let options = MergeOptions {
-        export_conflicts: if cli.rename_export_conflicts {
-            ExportConflictPolicy::Rename
-        } else if cli.skip_export_conflicts {
-            ExportConflictPolicy::Skip
-        } else {
-            ExportConflictPolicy::Error
+        exports: match &cli.entry {
+            Some(entry) => ExportSelection::Entry(entry.clone()),
+            None => ExportSelection::Union(match cli.export_conflicts {
+                ConflictPolicy::Error => ExportConflictPolicy::Error,
+                ConflictPolicy::Rename => ExportConflictPolicy::Rename,
+                ConflictPolicy::Skip => ExportConflictPolicy::Skip,
+            }),
         },
-        features,
-        validate: !cli.no_validation,
+        // The CLI deliberately has no wasm-proposal toggles: inputs are
+        // accepted and the output validated with every proposal enabled.
+        features: WasmFeatures::all(),
+        validate: !cli.no_validate,
     };
 
     let mut merger = Merger::new(options);
-    for pair in cli.inputs.chunks(2) {
-        let [file, name] = pair else { unreachable!() };
-        let bytes = std::fs::read(file)
-            .map_err(|error| anyhow::anyhow!("failed to read {file}: {error}"))?;
-        merger.add_module(name.as_str(), &bytes)?;
+    for argument in &cli.modules {
+        let (name, path) = parse_module_argument(argument)?;
+        let bytes = std::fs::read(&path)
+            .map_err(|error| anyhow::anyhow!("failed to read {}: {error}", path.display()))?;
+        merger.add_module(name, &bytes)?;
     }
 
     let merged = merger.merge()?;
 
-    let output: Vec<u8> = if cli.emit_text {
+    let output: Vec<u8> = if cli.text {
         wasmprinter::print_bytes(&merged)?.into_bytes()
     } else {
         merged
@@ -158,4 +162,21 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
 fn verify_cli() {
     use clap::CommandFactory;
     Cli::command().debug_assert();
+}
+
+#[test]
+fn module_arguments_parse() {
+    let (name, path) = parse_module_argument("app=target/app.wasm").unwrap();
+    assert_eq!(
+        (name.as_str(), path.to_str().unwrap()),
+        ("app", "target/app.wasm")
+    );
+
+    let (name, path) = parse_module_argument("target/lib.wasm").unwrap();
+    assert_eq!(
+        (name.as_str(), path.to_str().unwrap()),
+        ("lib", "target/lib.wasm")
+    );
+
+    assert!(parse_module_argument("=nameless.wasm").is_err());
 }
