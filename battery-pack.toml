@@ -45,6 +45,10 @@ name = "wild"
 version = "2.2.1"
 
 [[battery-pack]]
+name = "ci"
+features = ["default"]
+
+[[battery-pack]]
 name = "logging"
 features = ["default"]
 

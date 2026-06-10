@@ -58,16 +58,23 @@ Dependency management follows community battery packs via [`cargo-bp`](https://c
 
 ## Phases
 
-### Phase 0 — Scaffolding & CI  ✅ when committed
+### Phase 0 — Scaffolding & CI  ✅
 - [x] Toolchain check (rustc 1.96, edition 2024), install `cargo-bp`.
-- [ ] `cargo init` + `cargo bp add cli` / `error` / `ci`; lib+bin layout with `cli` feature.
-- [ ] wasm-tools dependencies (`wasmparser`, `wasm-encoder`, `wat`, `wasmprinter` 0.251.x).
-- [ ] rustfmt + clippy (warnings deny in CI), `.gitignore`.
-- [ ] GitHub Actions from ci battery pack template: fmt, clippy, test (ubuntu/macos/windows),
-      docs build.
-- [ ] README (install/use/contribute), CLAUDE.md, LICENSE-MIT + LICENSE-APACHE, NOTICE.
-- [ ] Validate (`cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`)
-      and commit.
+- [x] Battery packs `cli`/`error`/`logging`/`ci` registered; lib+bin layout with
+      default-on `cli` feature (`[[bin]] required-features`). NB: `cargo bp add`
+      rewrites dependency entries and drops `optional = true` — re-check after use.
+- [x] wasm-tools dependencies (`wasmparser`, `wasm-encoder` (+`wasmparser` feature for
+      reencode), `wat`, `wasmprinter` 0.251.x).
+- [x] GitHub Actions from ci battery pack `full` template: fmt, clippy (-D warnings),
+      warnings, docsrs, build matrix (ubuntu/macos/windows × stable, nightly on ubuntu,
+      ±default features), cargo-hack feature powerset, MSRV, lockfile, minimal-versions,
+      dependabot, scheduled audit + rust-next, release-plz scaffolding. The
+      cargo-semver-checks job is deferred until first crates.io publish (TODO in ci.yml).
+- [x] README (install/use/contribute), CLAUDE.md, LICENSE-MIT + LICENSE-APACHE, NOTICE.
+- [x] Validated (fmt, clippy -D warnings, tests with/without default features) and
+      committed.
+- NB: `repository` in Cargo.toml and badge URLs use an OWNER placeholder until a GitHub
+      remote exists.
 
 ### Phase 1 — MVP merge engine
 Goal: merge real modules with import fusing; cover the core binaryen test scenarios.
