@@ -11,8 +11,8 @@
 //! text output comes from wasmprinter and is formatted (and numbered)
 //! differently, so successful merges are snapshot-tested against our own
 //! output instead (`tests/snapshots/`, blessed with `SNAPSHOTS=overwrite`).
-//! Scenarios not yet implemented are listed at the bottom as ignored tests so
-//! coverage gaps stay visible; see PLAN.md for the phase plan.
+//! Fixtures that cannot be driven through the wat crate are listed at the
+//! bottom as ignored tests explaining why, so coverage gaps stay visible.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -357,8 +357,7 @@ fn types_mismatches_are_all_reported() {
     }
 }
 
-// Fixtures vendored but not runnable as-is — each ignored test explains why,
-// and PLAN.md tracks the remaining work (manifest.wat → phase 5).
+// Fixtures vendored but not runnable as-is — each ignored test explains why.
 
 #[test]
 #[ignore = "binaryen's test drives maps via wasm-as from ;;@ comments, which the wat \

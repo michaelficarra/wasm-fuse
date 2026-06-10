@@ -20,8 +20,7 @@ The merged module's exports can be either the **union** of every input's exports
 (what `wasm-merge` produces) or, with `--entry`, just the **entry-point module's**
 exports — the other modules then only serve to satisfy (some of) its imports.
 
-> **Status**: at full `wasm-merge` capability parity (see the checklist in
-> [PLAN.md](PLAN.md)), not yet published to crates.io.
+> **Status**: at full `wasm-merge` capability parity.
 
 ## Installation as a CLI
 
@@ -116,7 +115,6 @@ Contributions are welcome. To get started:
    cargo doc --no-deps --all-features
    ```
 
-[PLAN.md](PLAN.md) describes the roadmap and where help is most useful.
 Dependencies are organised with [cargo battery packs](https://crates.io/crates/cargo-bp);
 see `battery-pack.toml`.
 

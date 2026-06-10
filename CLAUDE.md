@@ -5,10 +5,10 @@ against exports of another at merge time. A Rust counterpart to binaryen's
 `wasm-merge`, built on the Bytecode Alliance wasm-tools crates (`wasmparser`,
 `wasm-encoder`, `wat`, `wasmprinter`). Usable as a library and as a CLI.
 
-**Read PLAN.md first**: it holds the phase roadmap, the wasm-merge reference
-semantics, the architecture decisions, and the parity checklist against binaryen's
-`test/lit/merge` suite. Keep it updated as work progresses (tick checkboxes, update
-the parity table and log).
+The project is at full wasm-merge capability parity: every scenario from binaryen's
+`test/lit/merge` suite is ported (or documented as unportable in an `#[ignore]`d
+test). The merge semantics and per-module design notes live in the crate and module
+rustdoc; start at `src/lib.rs`.
 
 ## Layout
 

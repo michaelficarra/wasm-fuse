@@ -255,8 +255,7 @@ pub(crate) fn parse_module<'a>(
                         module.branch_hints.push((function.func, hints));
                     }
                 }
-                // Other custom sections are dropped for now; see PLAN.md
-                // phase 4 (source maps).
+                // All other custom sections are dropped, as wasm-merge does.
                 _ => {}
             },
             _ => {}
