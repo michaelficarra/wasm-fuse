@@ -22,6 +22,73 @@ exports — the other modules then only serve to satisfy (some of) its imports.
 
 > **Status**: at full `wasm-merge` capability parity.
 
+## Capabilities
+
+**Merging and linking**
+
+- Merges any number of core modules into one; every index space — functions, tables,
+  memories, globals, tags, element and data segments, types — is concatenated and
+  remapped.
+- Fuses imports naming another input module to that module's exports: transitive
+  through re-export chains, with forward and circular references supported and
+  unresolvable import cycles reported.
+- Imports of modules outside the input set remain imports (partial linking).
+- Multiple memories and tables are kept side by side, never fused.
+- Types deduplicate across modules by isorecursive equivalence.
+- Multiple start functions fuse into one synthetic start (`merged.start.combined`)
+  that calls each in input order; globals are reordered so initialisers only read
+  earlier globals.
+- Every WebAssembly proposal is accepted — GC, exception handling, multi-memory,
+  memory64/table64, threads, exact references, … — with no feature flags; the
+  library exposes fine-grained `WasmFeatures` control.
+- Output is deterministic.
+
+**Export selection**
+
+- Union mode: every input's exports, with duplicate names resolved by policy —
+  error (default), rename (`_1`, `_2`, …), or skip (first wins).
+- Entry-point mode: only the named module's exports; the rest merely satisfy its
+  imports.
+
+**Checking and validation**
+
+- Fused import/export pairs are checked at merge time, all mismatches reported
+  together: function subtype chains (exact references require equality), global
+  mutability and content subtyping, table/memory limits, index types, sharedness,
+  page sizes, invariant tags — precise for concrete GC types via canonical identity.
+- The merged output is validated; inputs are not (one may only become valid once
+  merged). `--no-validate` skips both.
+
+**Pruning (opt-in)**
+
+- `--prune` drops everything unreachable from the kept exports and start functions,
+  across all item kinds and segments, with liveness flowing through fused imports.
+  Declarative element segments and active segments targeting imported tables or
+  memories are kept. With `--entry`, tree-shakes a bundle down to what the entry
+  module uses.
+
+**Debug information**
+
+- `-g`/`--keep-names` merges every name subsection — module, function, local, label,
+  type, table, memory, global, element, data, field, tag — onto merged indices; a
+  definition's name beats a fused import's alias; pruned items lose their names.
+- Branch hints are always preserved, with function indices remapped and instruction
+  offsets translated.
+- Source maps: per-input maps merge into one, with mappings translated to merged
+  byte offsets, sources and names deduplicated, `sourceRoot` folded in, and an
+  optional embedded `sourceMappingURL`.
+- `--output-manifest` writes a wasm-split manifest (function names per non-primary
+  module); implies keeping names.
+- All other custom sections are dropped, as `wasm-merge` does.
+
+**Interface**
+
+- A library — `Merger`/`MergeOptions`, typed errors, `merge_full` returning module,
+  source map, and manifest, no CLI dependencies under `default-features = false` —
+  and a CLI over the same engine.
+- Binary or text inputs, freely mixed; module names default to file stems, with
+  `NAME=PATH` to override; output to file or stdout, binary or text.
+
 ## Installation as a CLI
 
 ```sh

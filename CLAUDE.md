@@ -70,3 +70,7 @@ entries in Cargo.toml after running it.
   exists (tests assert on them).
 - Our text output comes from `wasmprinter` and differs from binaryen's printer;
   snapshot tests assert our own output, never binaryen CHECK lines.
+- The Capabilities section in README.md is the product's feature specification:
+  whenever a feature is added, removed, or its behaviour changes, update that list
+  in the same change. Keep its claims exactly as strong as what the tests exercise —
+  nothing aspirational.
