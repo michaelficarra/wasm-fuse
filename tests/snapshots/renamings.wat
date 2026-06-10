@@ -4,12 +4,9 @@
   (type (;2;) (func (param i64)))
   (type (;3;) (func))
   (type (;4;) (func (param (ref 0))))
-  (type (;5;) (array (mut funcref)))
-  (type (;6;) (func (param f64)))
-  (type (;7;) (func (param f32)))
-  (type (;8;) (func))
-  (type (;9;) (func (param (ref 5))))
-  (import "elsewhere" "some.tag" (tag (;0;) (type 6) (param f64)))
+  (type (;5;) (func (param f64)))
+  (type (;6;) (func (param f32)))
+  (import "elsewhere" "some.tag" (tag (;0;) (type 5) (param f64)))
   (table (;0;) 10 20 funcref)
   (table (;1;) 30 40 funcref)
   (table (;2;) 50 60 funcref)
@@ -20,8 +17,8 @@
   (memory (;3;) 70 80)
   (tag (;1;) (type 1) (param i32))
   (tag (;2;) (type 2) (param i64))
-  (tag (;3;) (type 7) (param f32))
-  (tag (;4;) (type 6) (param f64))
+  (tag (;3;) (type 6) (param f32))
+  (tag (;4;) (type 5) (param f64))
   (global (;0;) i32 i32.const 1)
   (global (;1;) i32 i32.const 2)
   (global (;2;) i32 i32.const 3)
@@ -106,15 +103,15 @@
     call 0
     call 1
   )
-  (func (;3;) (type 8)
+  (func (;3;) (type 3)
     i32.const 3
     drop
   )
-  (func (;4;) (type 8)
+  (func (;4;) (type 3)
     i32.const 4
     drop
   )
-  (func (;5;) (type 9) (param (ref 5))
+  (func (;5;) (type 4) (param (ref 0))
     block (result f32) ;; label = @1
       try_table (catch 3 0 (;@1;)) ;; label = @2
         nop
@@ -161,12 +158,12 @@
     i32.const 7
     i32.const 8
     i32.const 9
-    array.init_elem 5 2
+    array.init_elem 0 2
     local.get 0
     i32.const 10
     i32.const 11
     i32.const 12
-    array.init_elem 5 3
+    array.init_elem 0 3
     global.get 2
     drop
     global.get 3

@@ -16,6 +16,7 @@ use crate::merge::MergeError;
 use crate::parse::{Kind, KindMap, ParsedModule};
 use crate::prune::Liveness;
 use crate::remap::{PRUNED, RemapTables};
+use crate::types::TypeCanon;
 
 /// Where a reference ultimately lands after chasing fused imports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -125,6 +126,7 @@ pub(crate) fn layout(
     parsed: &[ParsedModule<'_>],
     resolution: &mut Resolution<'_>,
     live: Option<&Liveness>,
+    canon: &TypeCanon,
 ) -> Result<Layout, MergeError> {
     let item_live = |kind: Kind, site: Site| live.is_none_or(|live| live.item(kind, site));
 
@@ -205,21 +207,19 @@ pub(crate) fn layout(
         global_def_position.insert((module_idx, def_index), position as u32);
     }
 
-    // Type, element-segment, and data-segment spaces cannot be imported, so
-    // they remap by concatenation, skipping pruned segments. Types are never
-    // pruned (see prune.rs).
+    // Element- and data-segment spaces cannot be imported, so they remap by
+    // concatenation, skipping pruned segments. Types remap to their canonical
+    // indices (deduplicated across modules, never pruned).
     let mut remaps = Vec::with_capacity(parsed.len());
-    let mut type_offset = 0u32;
     let mut element_next = 0u32;
     let mut data_next = 0u32;
     for (module_idx, module) in parsed.iter().enumerate() {
         let elem_live = |index: u32| live.is_none_or(|live| live.elem(module_idx, index));
         let data_live = |index: u32| live.is_none_or(|live| live.data(module_idx, index));
         let mut tables = RemapTables {
-            types: (type_offset..type_offset + module.type_count()).collect(),
+            types: canon.maps[module_idx].clone(),
             ..RemapTables::default()
         };
-        type_offset += module.type_count();
         for index in 0..module.elements.len() as u32 {
             tables.elements.push(if elem_live(index) {
                 element_next += 1;

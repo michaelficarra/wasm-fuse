@@ -1,8 +1,6 @@
 (module
   (type (;0;) (func))
   (type (;1;) (func (result i32)))
-  (type (;2;) (func))
-  (type (;3;) (func (result i32)))
   (import "third" "missing" (func (;0;) (type 0)))
   (memory (;0;) 2)
   (memory (;1;) 2)
@@ -32,21 +30,21 @@
     i32.const 10
     i32.load 1
   )
-  (func (;4;) (type 2)
+  (func (;4;) (type 0)
     call 1
     i32.const 3
     drop
   )
-  (func (;5;) (type 2)
+  (func (;5;) (type 0)
     call 2
     i32.const 4
     drop
   )
-  (func (;6;) (type 3) (result i32)
+  (func (;6;) (type 1) (result i32)
     i32.const 10
     i32.load
   )
-  (func (;7;) (type 2)
+  (func (;7;) (type 0)
     throw 0
   )
 )

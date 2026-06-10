@@ -1,8 +1,6 @@
 (module
   (type (;0;) (array funcref))
   (type (;1;) (func))
-  (type (;2;) (array funcref))
-  (type (;3;) (func))
   (table (;0;) 1 funcref)
   (table (;1;) 10 funcref)
   (table (;2;) 100 funcref)
@@ -29,7 +27,7 @@
     array.new_elem 0 1
     drop
   )
-  (func (;1;) (type 3)
+  (func (;1;) (type 1)
     i32.const 1
     table.get 2
     drop
@@ -38,11 +36,11 @@
     drop
     i32.const 5
     i32.const 6
-    array.new_elem 2 2
+    array.new_elem 0 2
     drop
     i32.const 7
     i32.const 8
-    array.new_elem 2 3
+    array.new_elem 0 3
     drop
   )
 )

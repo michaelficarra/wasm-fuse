@@ -40,5 +40,6 @@ mod parse;
 mod prune;
 mod remap;
 mod resolve;
+mod types;
 
 pub use merge::{ExportConflictPolicy, ExportSelection, MergeError, MergeOptions, Merger};

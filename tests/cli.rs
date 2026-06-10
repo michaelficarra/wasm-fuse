@@ -504,3 +504,114 @@ fn prune_keeps_tables_reached_through_call_indirect() {
         "main and the table's handler should survive: {text}"
     );
 }
+
+#[test]
+fn identical_types_are_deduplicated_across_modules() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first.wat");
+    let second = dir.path().join("second.wat");
+    std::fs::write(
+        &first,
+        r#"(module (func (export "f") (result i32) (i32.const 1)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &second,
+        r#"(module (func (export "g") (result i32) (i32.const 2)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .args([&first, &second])
+        .args(["--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        text.matches("\n  (type").count(),
+        1,
+        "identical func types should share one entry: {text}"
+    );
+}
+
+#[test]
+fn concrete_type_mismatches_are_reported_at_merge_time() {
+    // The import's and export's function types reference structurally
+    // different struct types, so they cannot be isorecursively equivalent;
+    // the compatibility check (not output validation) must say so.
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.wat");
+    let app = dir.path().join("app.wat");
+    std::fs::write(
+        &lib,
+        r#"(module
+            (type $box (struct (field i64)))
+            (func (export "get") (result (ref null $box)) (ref.null $box)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &app,
+        r#"(module
+            (type $box (struct (field i32)))
+            (import "lib" "get" (func $get (result (ref null $box))))
+            (func (export "main") (result (ref null $box)) (call $get)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .args([&app, &lib])
+        .args(["-o", "-"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("type mismatch when importing function get from module lib"),
+        "expected a merge-time mismatch, got: {stderr}"
+    );
+}
+
+#[test]
+fn concrete_subtypes_satisfy_imports_across_modules() {
+    // The exported function's type is declared as a subtype of the type the
+    // import expects; the rec groups are identical across the two modules, so
+    // canonicalisation makes the chain check succeed.
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib.wat");
+    let app = dir.path().join("app.wat");
+    std::fs::write(
+        &lib,
+        r#"(module
+            (rec
+                (type $super (sub (func (result anyref))))
+                (type $sub (sub $super (func (result eqref)))))
+            (func (export "get") (type $sub) (ref.null eq)))"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &app,
+        r#"(module
+            (rec
+                (type $super (sub (func (result anyref))))
+                (type $sub (sub $super (func (result eqref)))))
+            (import "lib" "get" (func $get (type $super)))
+            (func (export "main") (result anyref) (call $get)))"#,
+    )
+    .unwrap();
+    let output = wasm_fuse()
+        .args([&app, &lib])
+        .args(["--text", "-o", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    // The two identical rec groups merged into one.
+    assert_eq!(
+        text.matches("(rec").count(),
+        1,
+        "the rec groups should have deduplicated: {text}"
+    );
+}

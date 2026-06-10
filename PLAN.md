@@ -132,11 +132,22 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 - ~~Feature-flag surface~~ — dropped deliberately: the CLI has no wasm-feature
       toggles (always all proposals); `WasmFeatures` stays a library option.
 
-### Phase 3 — GC, subtyping, 64-bit
-- [ ] Rec-group copying with cross-module type deduplication/canonicalisation.
-- [ ] Function subtyping on fuse (`func_subtyping.wat`, `func_subtyping_return.wat`).
-- [ ] Global subtyping (`global_subtyping.wat`).
-- [ ] memory64/table64 (`table64.wat`).
+### Phase 3 — GC, subtyping, 64-bit  ✅
+- [x] Cross-module type canonicalisation (`src/types.rs`): rec groups are deduplicated
+      isorecursively — each group is keyed by its byte encoding with external type refs
+      canonicalised and in-group refs made group-relative; identical keys share canonical
+      indices, so the merged type section carries one copy of each distinct group. The
+      synthetic combined start reuses an existing plain `(func)` type when one exists.
+      Types referenced by pruned items are still kept (future refinement).
+- [x] Function subtyping on fuse: by *declared* supertype chains over canonical indices
+      (function subtyping is nominal, not structural) — `func_subtyping.wat`,
+      `func_subtyping_return.wat`, plus a new cross-module rec-group chain test.
+      `FuncExact` imports require exact canonical equality.
+- [x] Global/table/tag checks handle concrete heap types precisely (canonical identity,
+      chain subtyping for immutable globals, exact-ref rules from custom-descriptors);
+      mismatches that previously surfaced as opaque validator errors are now reported as
+      merge-time "type mismatch when importing …" diagnostics.
+- [x] memory64/table64 (`table64.wat`) — covered since phase 1.
 
 ### Phase 4 — Debug info, names, source maps
 - [ ] `-g`/`--debuginfo`: merge names sections (module/function/local/type/etc.) with
@@ -167,7 +178,7 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
 | global-ordering.wat | global initialiser reordering | ✅ ported |
 | start.wat / start.flip.wat / start-return.wat / start3.wat | start fusion | ✅ ported |
 | types.wat | import/export type mismatch errors | ✅ ported (all 17 mismatches reported, matching binaryen's list) |
-| func_subtyping.wat / func_subtyping_return.wat | function subtyping (GC) | ✅ ported (concrete-type checks via output validation until phase 3) |
+| func_subtyping.wat / func_subtyping_return.wat | function subtyping (GC) | ✅ ported (precise merge-time checks via canonical supertype chains) |
 | global_subtyping.wat | global subtyping (GC) | ✅ ported (ditto) |
 | table64.wat | 64-bit tables | ✅ ported |
 | sourcemap.wat | source map preservation | ⏳ phase 4 (ignored test in place) |
@@ -199,3 +210,10 @@ Goal: merge real modules with import fusing; cover the core binaryen test scenar
   imports, start-function liveness, dead table+segment removal, call_indirect keep-
   alive cascade). Refinement ideas left for later: filter declarative segment items to
   live functions; prune unused types alongside phase 3 canonicalisation. Next: phase 3.
+- 2026-06-09: Phase 3 complete — isorecursive type canonicalisation dedupes rec groups
+  across modules (every snapshot with duplicated types shrank; reviewed); import/export
+  checks now decide concrete heap types via canonical indices and declared supertype
+  chains, including exact-ref rules. Three new tests: dedup count, merge-time concrete
+  mismatch diagnostics, cross-module subtype-chain satisfaction. Types unused after
+  pruning are still emitted — noted as a refinement. Next: phase 4 (names section,
+  source maps, annotations).

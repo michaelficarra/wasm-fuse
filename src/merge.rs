@@ -3,7 +3,7 @@
 
 use wasmparser::WasmFeatures;
 
-use crate::{check, emit, parse, prune, resolve};
+use crate::{check, emit, parse, prune, resolve, types};
 
 /// What to do when two input modules export the same name (in
 /// [`ExportSelection::Union`] mode).
@@ -215,18 +215,19 @@ impl Merger {
         // Also validates that an Entry export selection names an input module.
         let exports = emit::surviving_exports(&parsed, &self.options)?;
 
+        let canon = types::canonicalise(&parsed)?;
         let mut resolution = resolve::Resolution::new(&parsed);
         let liveness = if self.options.prune_unused {
             Some(prune::compute_liveness(&parsed, &mut resolution, &exports)?)
         } else {
             None
         };
-        let layout = resolve::layout(&parsed, &mut resolution, liveness.as_ref())?;
+        let layout = resolve::layout(&parsed, &mut resolution, liveness.as_ref(), &canon)?;
         if self.options.validate {
-            check::check_fused(&parsed, &mut resolution)?;
+            check::check_fused(&parsed, &mut resolution, &canon)?;
         }
 
-        let output = emit::emit(&parsed, &layout, &exports, liveness.as_ref())?;
+        let output = emit::emit(&parsed, &layout, &exports, liveness.as_ref(), &canon)?;
 
         if self.options.validate {
             wasmparser::Validator::new_with_features(self.options.features)

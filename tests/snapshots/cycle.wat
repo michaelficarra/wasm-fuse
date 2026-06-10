@@ -1,7 +1,5 @@
 (module
   (type (;0;) (func))
-  (type (;1;) (func))
-  (type (;2;) (func))
   (export "forward" (func 0))
   (export "reverse" (func 1))
   (export "forward_1" (func 2))
@@ -18,22 +16,22 @@
     drop
     call 5
   )
-  (func (;2;) (type 1)
+  (func (;2;) (type 0)
     i32.const 2
     drop
     call 4
   )
-  (func (;3;) (type 1)
+  (func (;3;) (type 0)
     i32.const -2
     drop
     call 1
   )
-  (func (;4;) (type 2)
+  (func (;4;) (type 0)
     i32.const 3
     drop
     call 0
   )
-  (func (;5;) (type 2)
+  (func (;5;) (type 0)
     i32.const -3
     drop
     call 3

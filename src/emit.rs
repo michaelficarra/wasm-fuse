@@ -15,6 +15,7 @@ use crate::parse::{Kind, ParsedModule};
 use crate::prune::Liveness;
 use crate::remap::{Remapper, flatten_error};
 use crate::resolve::Layout;
+use crate::types::TypeCanon;
 
 /// An export that survives export selection, with conflicts already resolved.
 pub(crate) struct SurvivingExport {
@@ -100,6 +101,7 @@ pub(crate) fn emit(
     layout: &Layout,
     exports: &[SurvivingExport],
     live: Option<&Liveness>,
+    canon: &TypeCanon,
 ) -> Result<Vec<u8>, MergeError> {
     let def_live = |kind: Kind, module: usize, def_index: u32| {
         live.is_none_or(|live| live.def(kind, module, def_index))
@@ -125,23 +127,23 @@ pub(crate) fn emit(
             );
         }
     }
-    let total_types: u32 = parsed.iter().map(|module| module.type_count()).sum();
-    let synthetic_start = (start_functions.len() > 1).then_some((total_types, layout.func_count));
+    // The synthetic combined start reuses an input's plain (func) type if one
+    // exists, otherwise a fresh one goes at the end of the type section.
+    let start_type = canon.empty_func.unwrap_or(canon.count);
+    let synthetic_start = (start_functions.len() > 1).then_some((start_type, layout.func_count));
 
     let mut module = Module::new();
 
-    // Types: all rec groups in module order, plus () -> () for the synthetic
-    // start function if one is needed.
+    // Types: the first occurrence of each distinct rec group, in canonical
+    // order (duplicates across modules collapse onto the same indices).
     let mut types = TypeSection::new();
-    for (module_idx, input) in parsed.iter().enumerate() {
+    for &(module_idx, group_idx) in &canon.unique_groups {
         let mut remapper = remapper(module_idx);
-        for group in &input.types {
-            remapper
-                .parse_recursive_type_group(types.ty(), group.clone())
-                .map_err(in_module(module_idx))?;
-        }
+        remapper
+            .parse_recursive_type_group(types.ty(), parsed[module_idx].types[group_idx].clone())
+            .map_err(in_module(module_idx))?;
     }
-    if synthetic_start.is_some() {
+    if synthetic_start.is_some() && canon.empty_func.is_none() {
         types.ty().function([], []);
     }
     if !types.is_empty() {

@@ -2,28 +2,30 @@
 //! them, mirroring wasm-merge's checks: a mismatch that would trap at
 //! instantiation time should fail the merge instead.
 //!
-//! Comparisons are structural. References to concrete (module-declared) heap
-//! types are not yet compared — that requires cross-module type
-//! canonicalisation (PLAN.md phase 3); incompatibilities involving them are
-//! still caught by output validation, just with a less precise error.
+//! Type identity is canonical (see types.rs): concrete heap types from
+//! different modules compare by canonical index, and subtyping between them
+//! follows their declared supertype chains, so checks are precise even for
+//! GC types.
 
 use wasmparser::{
-    AbstractHeapType, CompositeInnerType, FuncType, GlobalType, HeapType, Import, MemoryType,
-    RefType, SubType, TableType, TagType, TypeRef, ValType,
+    AbstractHeapType, CompositeInnerType, GlobalType, HeapType, Import, MemoryType, RefType,
+    SubType, TableType, TypeRef, ValType,
 };
 
 use crate::merge::MergeError;
 use crate::parse::{Kind, ParsedModule};
 use crate::resolve::{Resolution, Site};
+use crate::types::{HeapKind, TypeCanon};
 
 /// Check every fused import against the item that satisfies it. All
 /// mismatches are collected and reported together, like wasm-merge does.
 pub(crate) fn check_fused(
     parsed: &[ParsedModule<'_>],
     resolution: &mut Resolution<'_>,
+    canon: &TypeCanon,
 ) -> Result<(), MergeError> {
-    // Flattened type lists (rec groups expanded) per module, for looking up
-    // function types by index.
+    // Flattened type lists (rec groups expanded) per module, used only to
+    // render readable diagnostics.
     let types_flat: Vec<Vec<&SubType>> = parsed
         .iter()
         .map(|module| {
@@ -48,7 +50,9 @@ pub(crate) fn check_fused(
                 {
                     continue; // stays an import; nothing to check against
                 }
-                if let Some(detail) = check_one(parsed, &types_flat, module_idx, import, site) {
+                if let Some(detail) =
+                    check_one(parsed, &types_flat, canon, module_idx, import, site)
+                {
                     mismatches.push(detail);
                 }
             }
@@ -63,13 +67,14 @@ pub(crate) fn check_fused(
     }
 }
 
-/// The entity description of the item at a site.
-enum Provided<'a> {
-    Func(&'a FuncType),
-    Table(TableType),
+/// The entity description of the item at a site. Types are (module, index)
+/// pairs into that module's type space.
+enum Provided {
+    Func { module: usize, type_index: u32 },
+    Table(usize, TableType),
     Memory(MemoryType),
-    Global(GlobalType),
-    Tag(&'a FuncType),
+    Global(usize, GlobalType),
+    Tag { module: usize, type_index: u32 },
 }
 
 /// Check one fused import against the item satisfying it, returning a
@@ -77,6 +82,7 @@ enum Provided<'a> {
 fn check_one(
     parsed: &[ParsedModule<'_>],
     types_flat: &[Vec<&SubType>],
+    canon: &TypeCanon,
     importer: usize,
     import: &Import<'_>,
     site: Site,
@@ -92,65 +98,80 @@ fn check_one(
         ))
     };
 
-    let func_type_of = |module: usize, type_index: u32| -> Option<&FuncType> {
-        match &types_flat[module]
-            .get(type_index as usize)?
-            .composite_type
-            .inner
+    // Render a module's function type for diagnostics.
+    let describe = |module: usize, type_index: u32| -> String {
+        match types_flat[module]
+            .get(type_index as usize)
+            .map(|sub_type| &sub_type.composite_type.inner)
         {
-            CompositeInnerType::Func(func_type) => Some(func_type),
-            _ => None,
+            Some(CompositeInnerType::Func(func_type)) => format!("{func_type:?}"),
+            _ => format!("type {type_index}"),
         }
     };
 
-    // Describe the item the import was fused to. Anything that cannot be
-    // described without cross-module type canonicalisation is skipped
-    // (PLAN.md phase 3); output validation still catches real problems there.
+    // Describe the item the import was fused to.
     let provided = match site {
         Site::Import { module, slot } => {
             let target = parsed[module].imports[Kind::of_import(import.ty)][slot as usize];
             match target.ty {
                 TypeRef::Func(type_index) | TypeRef::FuncExact(type_index) => {
-                    Provided::Func(func_type_of(module, type_index)?)
+                    Provided::Func { module, type_index }
                 }
-                TypeRef::Table(ty) => Provided::Table(ty),
+                TypeRef::Table(ty) => Provided::Table(module, ty),
                 TypeRef::Memory(ty) => Provided::Memory(ty),
-                TypeRef::Global(ty) => Provided::Global(ty),
-                TypeRef::Tag(ty) => Provided::Tag(func_type_of(module, ty.func_type_idx)?),
+                TypeRef::Global(ty) => Provided::Global(module, ty),
+                TypeRef::Tag(ty) => Provided::Tag {
+                    module,
+                    type_index: ty.func_type_idx,
+                },
             }
         }
         Site::Def { module, def_index } => {
             let target = &parsed[module];
             match Kind::of_import(import.ty) {
-                Kind::Func => {
-                    Provided::Func(func_type_of(module, target.func_types[def_index as usize])?)
-                }
-                Kind::Table => Provided::Table(target.tables[def_index as usize].ty),
+                Kind::Func => Provided::Func {
+                    module,
+                    type_index: target.func_types[def_index as usize],
+                },
+                Kind::Table => Provided::Table(module, target.tables[def_index as usize].ty),
                 Kind::Memory => Provided::Memory(target.memories[def_index as usize]),
-                Kind::Global => Provided::Global(target.globals[def_index as usize].ty),
-                Kind::Tag => {
-                    let tag: TagType = target.tags[def_index as usize];
-                    Provided::Tag(func_type_of(module, tag.func_type_idx)?)
-                }
+                Kind::Global => Provided::Global(module, target.globals[def_index as usize].ty),
+                Kind::Tag => Provided::Tag {
+                    module,
+                    type_index: target.tags[def_index as usize].func_type_idx,
+                },
             }
         }
     };
 
     match (import.ty, provided) {
-        (
-            TypeRef::Func(expected_index) | TypeRef::FuncExact(expected_index),
-            Provided::Func(provided_type),
-        ) => {
-            // The export must be usable wherever the import is: a subtype.
-            let expected_type = func_type_of(importer, expected_index)?;
-            if let Some(false) = func_subtype(provided_type, expected_type) {
+        (TypeRef::Func(expected_index), Provided::Func { module, type_index }) => {
+            // The export's declared type must be (a declared subtype of) the
+            // import's; function subtyping is by declaration, not structure.
+            let expected = canon.canonical(importer, expected_index)?;
+            let found = canon.canonical(module, type_index)?;
+            if !canon.is_subtype(found, expected) {
                 return mismatch(format!(
                     "the export's type is not a subtype of the import's type \
-                     (import expects {expected_type:?}, export has {provided_type:?})"
+                     (import expects {}, export has {})",
+                    describe(importer, expected_index),
+                    describe(module, type_index),
                 ));
             }
         }
-        (TypeRef::Global(expected), Provided::Global(provided)) => {
+        (TypeRef::FuncExact(expected_index), Provided::Func { module, type_index }) => {
+            // An exact import is satisfied only by exactly that type.
+            let expected = canon.canonical(importer, expected_index)?;
+            let found = canon.canonical(module, type_index)?;
+            if found != expected {
+                return mismatch(format!(
+                    "the import expects exactly {}, but the export has {}",
+                    describe(importer, expected_index),
+                    describe(module, type_index),
+                ));
+            }
+        }
+        (TypeRef::Global(expected), Provided::Global(module, provided)) => {
             if expected.mutable != provided.mutable {
                 return mismatch(format!(
                     "the import expects {} global but the export is {}",
@@ -164,24 +185,33 @@ fn check_one(
             // Mutable globals are invariant; immutable ones allow the export
             // to be a subtype.
             let compatible = if expected.mutable {
-                val_types_equal(expected.content_type, provided.content_type)
+                val_types_equal(
+                    canon,
+                    (importer, expected.content_type),
+                    (module, provided.content_type),
+                )
             } else {
-                val_subtype(provided.content_type, expected.content_type)
+                val_subtype(
+                    canon,
+                    (module, provided.content_type),
+                    (importer, expected.content_type),
+                )
             };
-            if let Some(false) = compatible {
+            if !compatible {
                 return mismatch(format!(
                     "export type {:?} is incompatible with import type {:?}",
                     provided.content_type, expected.content_type,
                 ));
             }
         }
-        (TypeRef::Table(expected), Provided::Table(provided)) => {
+        (TypeRef::Table(expected), Provided::Table(module, provided)) => {
             if expected.table64 != provided.table64 {
                 return mismatch("table index types (table64) differ".to_string());
             }
-            if let Some(false) = val_types_equal(
-                ValType::Ref(expected.element_type),
-                ValType::Ref(provided.element_type),
+            if !val_types_equal(
+                canon,
+                (importer, ValType::Ref(expected.element_type)),
+                (module, ValType::Ref(provided.element_type)),
             ) {
                 return mismatch(format!(
                     "export type {:?} is different from import type {:?}",
@@ -216,12 +246,16 @@ fn check_one(
                 return mismatch(detail);
             }
         }
-        (TypeRef::Tag(expected), Provided::Tag(provided_type)) => {
-            // Tag types are invariant.
-            let expected_type = func_type_of(importer, expected.func_type_idx)?;
-            if let Some(false) = func_types_equal(expected_type, provided_type) {
+        (TypeRef::Tag(expected), Provided::Tag { module, type_index }) => {
+            // Tag types are invariant; canonical identity is exactly type
+            // equivalence.
+            let expected_canonical = canon.canonical(importer, expected.func_type_idx)?;
+            let found = canon.canonical(module, type_index)?;
+            if found != expected_canonical {
                 return mismatch(format!(
-                    "the import expects type {expected_type:?} but the export has type {provided_type:?}"
+                    "the import expects type {} but the export has type {}",
+                    describe(importer, expected.func_type_idx),
+                    describe(module, type_index),
                 ));
             }
         }
@@ -260,90 +294,139 @@ fn check_limits(
     }
 }
 
-// The comparisons below return `Some(verdict)` when the types can be compared
-// without cross-module type canonicalisation, and `None` when a concrete
-// (module-declared) heap type is involved — those comparisons are deferred to
-// output validation until phase 3 (see PLAN.md).
-
-/// Is `sub` a function subtype of `sup` (contravariant parameters, covariant
-/// results)?
-fn func_subtype(sub: &FuncType, sup: &FuncType) -> Option<bool> {
-    if sub.params().len() != sup.params().len() || sub.results().len() != sup.results().len() {
-        return Some(false);
-    }
-    let mut comparable = true;
-    let parameters = sup.params().iter().zip(sub.params());
-    let results = sub.results().iter().zip(sup.results());
-    for (&narrower, &wider) in parameters.chain(results) {
-        match val_subtype(narrower, wider) {
-            Some(true) => {}
-            Some(false) => return Some(false),
-            None => comparable = false,
-        }
-    }
-    comparable.then_some(true)
-}
-
-/// Are the two function types equal?
-fn func_types_equal(expected: &FuncType, provided: &FuncType) -> Option<bool> {
-    if expected.params().len() != provided.params().len()
-        || expected.results().len() != provided.results().len()
-    {
-        return Some(false);
-    }
-    let mut comparable = true;
-    for (&e, &p) in expected
-        .params()
-        .iter()
-        .zip(provided.params())
-        .chain(expected.results().iter().zip(provided.results()))
-    {
-        match val_types_equal(e, p) {
-            Some(true) => {}
-            Some(false) => return Some(false),
-            None => comparable = false,
-        }
-    }
-    comparable.then_some(true)
-}
+// Value-type comparisons take (module, type) pairs so concrete heap types can
+// be translated to canonical indices. References whose indices cannot be
+// canonicalised (exotic forms that plain parsing never produces) are treated
+// as compatible; output validation remains the backstop.
 
 /// Is `sub` a value subtype of `sup`?
-fn val_subtype(sub: ValType, sup: ValType) -> Option<bool> {
-    match (sub, sup) {
-        (ValType::Ref(sub), ValType::Ref(sup)) => ref_subtype(sub, sup),
-        _ => Some(sub == sup),
+fn val_subtype(canon: &TypeCanon, sub: (usize, ValType), sup: (usize, ValType)) -> bool {
+    match (sub.1, sup.1) {
+        (ValType::Ref(sub_ref), ValType::Ref(sup_ref)) => {
+            ref_subtype(canon, (sub.0, sub_ref), (sup.0, sup_ref))
+        }
+        (sub, sup) => sub == sup,
     }
 }
 
 /// Are the two value types equal?
-fn val_types_equal(expected: ValType, provided: ValType) -> Option<bool> {
-    let concrete = |ty: ValType| matches!(ty, ValType::Ref(r) if matches!(r.heap_type(), HeapType::Concrete(_)));
-    if concrete(expected) || concrete(provided) {
-        return None;
+fn val_types_equal(canon: &TypeCanon, a: (usize, ValType), b: (usize, ValType)) -> bool {
+    match (a.1, b.1) {
+        (ValType::Ref(a_ref), ValType::Ref(b_ref)) => {
+            if a_ref.is_nullable() != b_ref.is_nullable() {
+                return false;
+            }
+            match (a_ref.heap_type(), b_ref.heap_type()) {
+                (HeapType::Concrete(a_index), HeapType::Concrete(b_index))
+                | (HeapType::Exact(a_index), HeapType::Exact(b_index)) => {
+                    match (
+                        canonical(canon, a.0, a_index),
+                        canonical(canon, b.0, b_index),
+                    ) {
+                        (Some(a_canonical), Some(b_canonical)) => a_canonical == b_canonical,
+                        _ => true, // undecidable: defer to output validation
+                    }
+                }
+                (HeapType::Concrete(_) | HeapType::Exact(_), _)
+                | (_, HeapType::Concrete(_) | HeapType::Exact(_)) => false,
+                (a_heap, b_heap) => a_heap == b_heap,
+            }
+        }
+        (a, b) => a == b,
     }
-    Some(expected == provided)
 }
 
-/// Is `sub` a reference subtype of `sup`? Only abstract heap types can be
-/// decided here.
-fn ref_subtype(sub: RefType, sup: RefType) -> Option<bool> {
-    let (
-        HeapType::Abstract {
-            shared: sub_shared,
-            ty: sub_heap,
-        },
-        HeapType::Abstract {
-            shared: sup_shared,
-            ty: sup_heap,
-        },
-    ) = (sub.heap_type(), sup.heap_type())
-    else {
-        return None;
-    };
-    if sub.is_nullable() && !sup.is_nullable() {
-        return Some(false);
+/// Is `sub` a reference subtype of `sup`?
+fn ref_subtype(canon: &TypeCanon, sub: (usize, RefType), sup: (usize, RefType)) -> bool {
+    if sub.1.is_nullable() && !sup.1.is_nullable() {
+        return false;
     }
-    Some(sub_shared == sup_shared && abstract_subtype(sub_heap, sup_heap))
+    match (sub.1.heap_type(), sup.1.heap_type()) {
+        (
+            HeapType::Abstract {
+                shared: sub_shared,
+                ty: sub_heap,
+            },
+            HeapType::Abstract {
+                shared: sup_shared,
+                ty: sup_heap,
+            },
+        ) => sub_shared == sup_shared && abstract_subtype(sub_heap, sup_heap),
+        // Concrete vs concrete: follow the declared supertype chain. An
+        // exact type sits strictly below its plain type, so `exact $t` is a
+        // subtype of anything `$t` is, while only equality (or a bottom type)
+        // gets *into* an exact type.
+        (
+            HeapType::Concrete(sub_index) | HeapType::Exact(sub_index),
+            HeapType::Concrete(sup_index),
+        ) => {
+            match (
+                canonical(canon, sub.0, sub_index),
+                canonical(canon, sup.0, sup_index),
+            ) {
+                (Some(sub_canonical), Some(sup_canonical)) => {
+                    canon.is_subtype(sub_canonical, sup_canonical)
+                }
+                _ => true,
+            }
+        }
+        (HeapType::Exact(sub_index), HeapType::Exact(sup_index)) => {
+            match (
+                canonical(canon, sub.0, sub_index),
+                canonical(canon, sup.0, sup_index),
+            ) {
+                (Some(sub_canonical), Some(sup_canonical)) => sub_canonical == sup_canonical,
+                _ => true,
+            }
+        }
+        (HeapType::Concrete(_), HeapType::Exact(_)) => false,
+        // A concrete (or exact) type is a subtype of the abstract types above
+        // its hierarchy's top.
+        (
+            HeapType::Concrete(sub_index) | HeapType::Exact(sub_index),
+            HeapType::Abstract { shared, ty },
+        ) => match canonical(canon, sub.0, sub_index) {
+            Some(sub_canonical) => {
+                let (kind, sub_shared) = canon.kind(sub_canonical);
+                sub_shared == shared && abstract_subtype(hierarchy_top(kind), ty)
+            }
+            None => true,
+        },
+        // Only a hierarchy's bottom type is a subtype of a concrete type.
+        (
+            HeapType::Abstract { shared, ty },
+            HeapType::Concrete(sup_index) | HeapType::Exact(sup_index),
+        ) => match canonical(canon, sup.0, sup_index) {
+            Some(sup_canonical) => {
+                let (kind, sup_shared) = canon.kind(sup_canonical);
+                shared == sup_shared && ty == hierarchy_bottom(kind)
+            }
+            None => true,
+        },
+    }
+}
+
+fn canonical(canon: &TypeCanon, module: usize, index: wasmparser::UnpackedIndex) -> Option<u32> {
+    canon.canonical(module, index.as_module_index()?)
+}
+
+/// The abstract top of a concrete type's hierarchy.
+fn hierarchy_top(kind: HeapKind) -> AbstractHeapType {
+    match kind {
+        HeapKind::Func => AbstractHeapType::Func,
+        HeapKind::Struct => AbstractHeapType::Struct,
+        HeapKind::Array => AbstractHeapType::Array,
+        HeapKind::Cont => AbstractHeapType::Cont,
+    }
+}
+
+/// The abstract bottom of a concrete type's hierarchy.
+fn hierarchy_bottom(kind: HeapKind) -> AbstractHeapType {
+    match kind {
+        HeapKind::Func => AbstractHeapType::NoFunc,
+        HeapKind::Struct | HeapKind::Array => AbstractHeapType::None,
+        HeapKind::Cont => AbstractHeapType::NoCont,
+    }
 }
 
 /// The subtyping lattice between abstract heap types, per hierarchy.
