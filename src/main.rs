@@ -5,8 +5,7 @@ use std::process::ExitCode;
 use anstream::eprintln;
 use anstyle::AnsiColor;
 use clap::{Parser, ValueEnum};
-use wasm_fuse::{ExportConflictPolicy, MergeOptions, Merger};
-use wasmparser::WasmFeatures;
+use wasm_fuse::{ExportConflictPolicy, MergeOptions, Merger, WasmFeatures};
 
 /// Merge multiple WebAssembly modules into one.
 ///

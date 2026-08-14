@@ -148,10 +148,7 @@ impl Reencode for Remapper<'_> {
 pub(crate) fn flatten_error(error: ReencodeError<MergeError>, module: &str) -> MergeError {
     match error {
         ReencodeError::UserError(error) => error,
-        ReencodeError::ParseError(source) => MergeError::InvalidModule {
-            name: module.to_string(),
-            source,
-        },
+        ReencodeError::ParseError(source) => MergeError::invalid_module(module, source),
         other => MergeError::Reencode {
             module: module.to_string(),
             message: other.to_string(),

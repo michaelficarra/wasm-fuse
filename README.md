@@ -42,7 +42,7 @@ for modules whose behaviour lives in their start function.
   earlier globals.
 - Every WebAssembly proposal is accepted — GC, exception handling, multi-memory,
   memory64/table64, threads, exact references, … — with no feature flags; the
-  library exposes fine-grained `WasmFeatures` control.
+  library exposes fine-grained, dependency-independent `WasmFeatures` control.
 - Output is deterministic.
 
 **Export selection**

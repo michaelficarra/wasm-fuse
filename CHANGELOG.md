@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0](https://github.com/michaelficarra/wasm-fuse/compare/v3.0.0...v4.0.0) - 2026-08-14
+
+### Changed
+
+- Update the Wasm tools dependencies to 0.256.
+- Replace public Wasm tools types with wasm-fuse-owned feature and error types.
+
 ## [3.0.0](https://github.com/michaelficarra/wasm-fuse/compare/v2.0.0...v3.0.0) - 2026-06-10
 
 ### Other

@@ -8,8 +8,7 @@
 
 use arbitrary::{Arbitrary, Unstructured};
 use libfuzzer_sys::fuzz_target;
-use wasm_fuse::{ExportConflictPolicy, MergeOptions, Merger};
-use wasmparser::WasmFeatures;
+use wasm_fuse::{ExportConflictPolicy, MergeOptions, Merger, WasmFeatures};
 
 fuzz_target!(|data: &[u8]| {
     let mut unstructured = Unstructured::new(data);

@@ -165,9 +165,8 @@ pub(crate) fn parse_module<'a>(
         branch_hints: Vec::new(),
     };
 
-    let invalid = |source: wasmparser::BinaryReaderError| MergeError::InvalidModule {
-        name: name.to_string(),
-        source,
+    let invalid = |source: wasmparser::BinaryReaderError| {
+        MergeError::invalid_module(name.to_string(), source)
     };
 
     for payload in Parser::new(0).parse_all(bytes) {

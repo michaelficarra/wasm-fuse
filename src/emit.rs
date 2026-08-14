@@ -508,10 +508,7 @@ impl SpliceContext<'_, '_> {
 
     fn invalid(&self, module_idx: usize) -> impl Fn(wasmparser::BinaryReaderError) -> MergeError {
         let name = self.parsed[module_idx].name.clone();
-        move |source| MergeError::InvalidModule {
-            name: name.clone(),
-            source,
-        }
+        move |source| MergeError::invalid_module(name.clone(), source)
     }
 }
 

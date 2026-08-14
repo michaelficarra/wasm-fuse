@@ -1,6 +1,6 @@
 [package]
 name = "wasm-fuse"
-version = "3.0.0"
+version = "4.0.0"
 edition = "2024"
 description = "Merge multiple WebAssembly modules into one — a Rust counterpart to binaryen's wasm-merge"
 license = "MIT OR Apache-2.0"
@@ -52,11 +52,14 @@ cli = [
 ]
 
 [dependencies]
+# Stable feature-set surface (library side)
+bitflags = "2.13.0"
+
 # Bytecode Alliance plumbing (the wasm-tools family)
-wasm-encoder = { version = "0.251", features = ["wasmparser"] }
-wasmparser = "0.251"
-wasmprinter = "0.251"
-wat = "1.251"
+wasm-encoder = { version = "0.256", features = ["wasmparser"] }
+wasmparser = "0.256"
+wasmprinter = "0.256"
+wat = "1.256"
 # error battery pack (library side)
 thiserror = "2.0.18"
 
@@ -87,8 +90,8 @@ criterion = { version = "0.8", features = ["html_reports"] }
 serde_json = "1.0.150"
 snapbox = { version = "1.2.2", features = ["cmd"] }
 tempfile = "3.27.0"
-wasmparser = "0.251"
-wat = "1.251"
+wasmparser = "0.256"
+wat = "1.256"
 
 [[bench]]
 name = "merge"

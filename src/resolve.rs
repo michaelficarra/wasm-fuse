@@ -303,12 +303,9 @@ fn order_globals(
         let global = &parsed[module_idx].globals[def_index as usize];
         let mut operators = global.init_expr.get_operators_reader();
         while !operators.eof() {
-            let operator = operators
-                .read()
-                .map_err(|source| MergeError::InvalidModule {
-                    name: parsed[module_idx].name.clone(),
-                    source,
-                })?;
+            let operator = operators.read().map_err(|source| {
+                MergeError::invalid_module(parsed[module_idx].name.clone(), source)
+            })?;
             if let Operator::GlobalGet { global_index } = operator
                 && let Site::Def { module, def_index } =
                     resolution.resolve(Kind::Global, module_idx, global_index)?

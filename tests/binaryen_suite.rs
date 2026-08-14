@@ -372,10 +372,9 @@ fn annotations() {
     // Branch hints (metadata.code.branch_hint) survive the merge with their
     // function indices and instruction offsets remapped. The fixture's
     // binaryen-proprietary (@binaryen.js.called) annotation is dropped by the
-    // wat crate at parse time and cannot be preserved. NB: the wat crate
-    // attaches a folded-form hint to the first instruction of the unfolded
-    // condition (i32.const), and the merge preserves that input encoding
-    // byte-for-byte; binaryen's own parser attaches it to the `if`.
+    // wat crate at parse time and cannot be preserved. The wat crate attaches
+    // a folded-form hint to the annotated `if` after unfolding its condition,
+    // and the merge preserves that input offset while re-encoding.
     let text = merge_to_text(
         &[
             ("annotations.wat", "first"),

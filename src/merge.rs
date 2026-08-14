@@ -1,9 +1,10 @@
 //! The merge engine: collects named input modules, resolves cross-module
 //! imports, and emits a single combined module.
 
-use wasmparser::WasmFeatures;
+use std::error::Error;
+use std::fmt;
 
-use crate::{check, emit, inline, names, parse, prune, resolve, sourcemap, types};
+use crate::{WasmFeatures, check, emit, inline, names, parse, prune, resolve, sourcemap, types};
 
 /// What to do when two kept modules export the same name (see
 /// [`MergeOptions::export_conflicts`]).
@@ -93,6 +94,49 @@ impl Default for MergeOptions {
     }
 }
 
+/// An opaque underlying cause of a [`MergeError`].
+///
+/// The concrete parser and encoder error types remain private implementation
+/// details, allowing those dependencies to change without changing
+/// wasm-fuse's public API.
+pub struct MergeErrorSource {
+    inner: Box<dyn Error + Send + Sync + 'static>,
+}
+
+impl MergeErrorSource {
+    fn new(source: impl Error + Send + Sync + 'static) -> Self {
+        Self {
+            inner: Box::new(source),
+        }
+    }
+
+    /// Return the underlying error as a standard error trait object.
+    pub fn as_error(&self) -> &(dyn Error + Send + Sync + 'static) {
+        self.inner.as_ref()
+    }
+}
+
+impl fmt::Debug for MergeErrorSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("MergeErrorSource")
+            .field(&self.inner)
+            .finish()
+    }
+}
+
+impl fmt::Display for MergeErrorSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.inner, formatter)
+    }
+}
+
+impl Error for MergeErrorSource {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.inner.as_ref())
+    }
+}
+
 /// An error produced while adding modules to a [`Merger`] or merging them.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -104,7 +148,7 @@ pub enum MergeError {
         name: String,
         /// The underlying parse error.
         #[source]
-        source: wat::Error,
+        source: MergeErrorSource,
     },
     /// An input module was malformed or failed validation.
     #[error("invalid module {name:?}: {source}")]
@@ -113,7 +157,7 @@ pub enum MergeError {
         name: String,
         /// The underlying error.
         #[source]
-        source: wasmparser::BinaryReaderError,
+        source: MergeErrorSource,
     },
     /// Two input modules were added under the same name.
     #[error("duplicate module name {name:?}")]
@@ -184,7 +228,7 @@ pub enum MergeError {
     },
     /// The merged module failed validation.
     #[error("merged module failed validation: {0}")]
-    Validation(#[from] wasmparser::BinaryReaderError),
+    Validation(#[source] MergeErrorSource),
     /// A source map could not be parsed or applied.
     #[error("invalid source map for module {module:?}: {message}")]
     SourceMap {
@@ -199,6 +243,29 @@ pub enum MergeError {
         /// The module name that was not found.
         name: String,
     },
+}
+
+impl MergeError {
+    fn parse(name: String, source: wat::Error) -> Self {
+        Self::Parse {
+            name,
+            source: MergeErrorSource::new(source),
+        }
+    }
+
+    pub(crate) fn invalid_module(
+        name: impl Into<String>,
+        source: impl Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::InvalidModule {
+            name: name.into(),
+            source: MergeErrorSource::new(source),
+        }
+    }
+
+    pub(crate) fn validation(source: impl Error + Send + Sync + 'static) -> Self {
+        Self::Validation(MergeErrorSource::new(source))
+    }
 }
 
 /// The products of a merge.
@@ -252,10 +319,7 @@ impl Merger {
         // merge into a valid module (e.g. a ref.func of an import that only
         // becomes a declared function once fused to an export).
         let binary = wat::parse_bytes(bytes)
-            .map_err(|source| MergeError::Parse {
-                name: name.clone(),
-                source,
-            })?
+            .map_err(|source| MergeError::parse(name.clone(), source))?
             .into_owned();
         self.inputs.push(InputModule {
             name,
@@ -375,8 +439,9 @@ impl Merger {
         };
 
         if self.options.validate {
-            wasmparser::Validator::new_with_features(self.options.features)
-                .validate_all(&output)?;
+            wasmparser::Validator::new_with_features(self.options.features.to_wasmparser())
+                .validate_all(&output)
+                .map_err(MergeError::validation)?;
         }
         Ok(Merged {
             module: output,

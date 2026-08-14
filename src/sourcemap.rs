@@ -156,7 +156,7 @@ pub(crate) fn build(
     // (just emitted), so parse errors are internal bugs.
     let mut body_starts = Vec::new();
     for payload in Parser::new(0).parse_all(merged) {
-        if let Payload::CodeSectionEntry(body) = payload.map_err(MergeError::Validation)? {
+        if let Payload::CodeSectionEntry(body) = payload.map_err(MergeError::validation)? {
             body_starts.push(body.range().start);
         }
     }

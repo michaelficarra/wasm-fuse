@@ -37,6 +37,7 @@
 //! ```
 mod check;
 mod emit;
+mod features;
 mod inline;
 mod merge;
 mod names;
@@ -47,4 +48,5 @@ mod resolve;
 mod sourcemap;
 mod types;
 
-pub use merge::{ExportConflictPolicy, MergeError, MergeOptions, Merged, Merger};
+pub use features::WasmFeatures;
+pub use merge::{ExportConflictPolicy, MergeError, MergeErrorSource, MergeOptions, Merged, Merger};

@@ -138,19 +138,13 @@ pub(crate) fn plan(
                 module: module_idx,
                 def_index: def_index as u32,
             };
-            let mut operators =
-                body.get_operators_reader()
-                    .map_err(|source| MergeError::InvalidModule {
-                        name: module.name.clone(),
-                        source,
-                    })?;
+            let mut operators = body
+                .get_operators_reader()
+                .map_err(|source| MergeError::invalid_module(module.name.clone(), source))?;
             while !operators.eof() {
                 let operator = operators
                     .read()
-                    .map_err(|source| MergeError::InvalidModule {
-                        name: module.name.clone(),
-                        source,
-                    })?;
+                    .map_err(|source| MergeError::invalid_module(module.name.clone(), source))?;
                 match operator {
                     Operator::Call { function_index } => {
                         let target = resolution.resolve(Kind::Func, module_idx, function_index)?;
@@ -223,10 +217,7 @@ pub(crate) fn plan(
         // them), tail calls are not.
         let parsed_module = &parsed[module];
         let body = &parsed_module.code[def_index as usize];
-        let invalid = |source| MergeError::InvalidModule {
-            name: parsed_module.name.clone(),
-            source,
-        };
+        let invalid = |source| MergeError::invalid_module(parsed_module.name.clone(), source);
         let mut has_return = false;
         let mut has_tail_call = false;
         // Per local: position of the first read anywhere, and of the first

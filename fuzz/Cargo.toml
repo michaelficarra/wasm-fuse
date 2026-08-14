@@ -21,7 +21,4 @@ path = "fuzz_targets/fuzz_merge.rs"
 doc = false
 
 [dependencies.wasm-smith]
-version = "0.251"
-
-[dependencies.wasmparser]
-version = "0.251"
+version = "0.256"
